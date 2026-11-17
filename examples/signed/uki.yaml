@@ -1,0 +1,18 @@
+# Signed records. See README.md in this directory for the rollout steps.
+
+tasks:
+  lint:
+    run: golangci-lint run ./...
+  test:
+    run: go test ./...
+
+branches:
+  - match: "**"
+    tasks: [lint, test]
+
+record:
+  # Create record commits with `git commit -S` (configure SSH signing first).
+  sign: true
+  # Accept only records whose latest commit is SSH-signed by a key listed here.
+  # The file is read from the default branch when GitHub Actions marks commits.
+  allowed_signers: .uki/allowed_signers

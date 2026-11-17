@@ -1,0 +1,39 @@
+# A Node.js project.
+#
+# Tasks run sequentially in the order a branch rule lists them, so `install`
+# comes first. All tasks run even if one fails (use `uki run --fail-fast` to
+# stop early).
+
+tasks:
+  install:
+    run: npm ci
+  typecheck:
+    run: npx tsc --noEmit
+  lint:
+    run: npm run lint
+  test:
+    run: npm test
+    env:
+      CI: "true"        # quote values that YAML would read as booleans/numbers
+      NODE_ENV: test
+  e2e:
+    # Tasks must leave the working tree clean: write reports to a
+    # .gitignore-d directory, otherwise the result is not recorded.
+    run: npx playwright test --reporter=line
+    env:
+      CI: "true"
+  docs:
+    run: npx markdownlint-cli2 "**/*.md"
+
+branches:
+  - match: main
+    tasks: [install, typecheck, lint, test, e2e]
+  # Documentation-only branches skip the code checks.
+  - match: "docs/**"
+    tasks: [docs]
+  - match: "**"
+    tasks: [install, typecheck, lint, test]
+
+status:
+  # The commit status name shown on GitHub; require this name in branch protection.
+  context: local-ci

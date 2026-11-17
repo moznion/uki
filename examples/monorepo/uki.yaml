@@ -1,0 +1,33 @@
+# A repository with a Go backend and a TypeScript frontend.
+#
+# Tasks always start at the repository root, so each one changes into its
+# component directory. Branch prefixes select which components a branch is
+# checked against; `main` checks everything.
+
+tasks:
+  backend-lint:
+    run: cd backend && golangci-lint run ./...
+  backend-test:
+    run: cd backend && go test ./...
+  frontend-lint:
+    run: cd frontend && npm ci && npm run lint
+  frontend-test:
+    run: cd frontend && npm ci && npm test
+  contract:
+    # Checks that the frontend's generated API client matches the backend schema.
+    run: make -C tools check-contract
+
+branches:
+  - match: main
+    tasks: [backend-lint, backend-test, frontend-lint, frontend-test, contract]
+  - match: "backend/**"
+    tasks: [backend-lint, backend-test, contract]
+  - match: "frontend/**"
+    tasks: [frontend-lint, frontend-test, contract]
+  - match: "**"
+    tasks: [backend-lint, backend-test, frontend-lint, frontend-test, contract]
+
+record:
+  # A custom records branch. The generated workflow reads this name from
+  # uki.yaml (`uki mark --github-event`), so nothing else needs to change.
+  branch: ci/records

@@ -1,0 +1,95 @@
+package config
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestMatchGlob(t *testing.T) {
+	cases := []struct {
+		pattern, name string
+		want          bool
+	}{
+		{"main", "main", true},
+		{"main", "main2", false},
+		{"feature/*", "feature/foo", true},
+		{"feature/*", "feature/foo/bar", false},
+		{"feature/**", "feature/foo/bar", true},
+		{"release-?", "release-1", true},
+		{"release-?", "release-10", false},
+		{"**", "anything/at/all", true},
+		{"fix.*", "fixx", false},
+	}
+	for _, c := range cases {
+		if got := matchGlob(c.pattern, c.name); got != c.want {
+			t.Errorf("matchGlob(%q, %q) = %v, want %v", c.pattern, c.name, got, c.want)
+		}
+	}
+}
+
+func TestParseAndTasksForBranch(t *testing.T) {
+	c, err := Parse([]byte(`
+tasks:
+  lint: { run: "echo lint" }
+  test: { run: "echo test" }
+branches:
+  - match: main
+    tasks: [lint, test]
+  - match: "**"
+    tasks: [lint]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Record.Branch != "uki/records" || c.Record.Remote != "origin" || c.Status.Context != "uki" {
+		t.Errorf("defaults not applied: %+v", c)
+	}
+	got, ok := c.TasksForBranch("main")
+	if !ok || !reflect.DeepEqual(got, []string{"lint", "test"}) {
+		t.Errorf("main: got %v %v", got, ok)
+	}
+	got, ok = c.TasksForBranch("feature/x")
+	if !ok || !reflect.DeepEqual(got, []string{"lint"}) {
+		t.Errorf("feature/x: got %v %v", got, ok)
+	}
+}
+
+func TestParseRejectsUnknownTask(t *testing.T) {
+	_, err := Parse([]byte(`
+tasks:
+  lint: { run: "echo lint" }
+branches:
+  - match: main
+    tasks: [test]
+`))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestParseRejectsUnknownField(t *testing.T) {
+	_, err := Parse([]byte(`
+taks:
+  lint: { run: "echo lint" }
+`))
+	if err == nil {
+		t.Fatal("expected error for unknown top-level field")
+	}
+	_, err = Parse([]byte(`
+tasks:
+  lint: { run: "echo lint", evn: { A: "1" } }
+`))
+	if err == nil {
+		t.Fatal("expected error for unknown nested field")
+	}
+}
+
+func TestParseEmpty(t *testing.T) {
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Record.Branch != "uki/records" {
+		t.Errorf("default branch not applied: %q", c.Record.Branch)
+	}
+}

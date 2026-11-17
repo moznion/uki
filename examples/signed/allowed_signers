@@ -1,0 +1,11 @@
+# Copy to .uki/allowed_signers in your repository.
+#
+# Format: one key per line, "<principal> <public key>", as in the
+# ALLOWED SIGNERS section of ssh-keygen(1). Use the email address each
+# person commits with as the principal.
+#
+# The keys below are placeholders; replace them with your team's public keys
+# (e.g. the contents of ~/.ssh/id_ed25519.pub).
+
+alice@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPLACEHOLDERPLACEHOLDERPLACEHOLDERALICE
+bob@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPLACEHOLDERPLACEHOLDERPLACEHOLDERBOB0

@@ -1,0 +1,42 @@
+#!/bin/sh
+# git pre-push hook: make sure every commit being pushed has a passing uki
+# record, running uki for the commit if needed.
+#
+# Install:
+#   cp examples/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#
+# Skip once with: git push --no-verify
+set -eu
+
+zero=0000000000000000000000000000000000000000
+
+# Pushes to the records branch (uki does this itself) need no check.
+if ! records_branch=$(uki config get record.branch </dev/null); then
+	echo "pre-push: cannot read record.branch from uki.yaml" >&2
+	exit 1
+fi
+
+while read -r _ local_sha remote_ref _; do
+	# Branch deletions have nothing to check.
+	[ "$local_sha" = "$zero" ] && continue
+	case "$remote_ref" in
+		refs/heads/*) branch=${remote_ref#refs/heads/} ;;
+		*) continue ;;
+	esac
+	[ "$branch" = "$records_branch" ] && continue
+
+	# Exit codes: 0 = success, 1 = failure/error, 3 = pending.
+	set +e
+	# </dev/null: git feeds the refs being pushed on stdin; keep tasks off it.
+	uki status --rev "$local_sha" --branch "$branch" </dev/null >/dev/null 2>&1
+	code=$?
+	set -e
+	[ "$code" -eq 0 ] && continue
+
+	if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+		echo "pre-push: $branch ($local_sha) has no passing uki record; check it out and run 'uki run'." >&2
+		exit 1
+	fi
+	echo "pre-push: no passing uki record for $branch; running 'uki run'..." >&2
+	uki run --branch "$branch" </dev/null
+done

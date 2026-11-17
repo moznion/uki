@@ -1,0 +1,25 @@
+# uki's own CI, run with uki itself.
+tasks:
+  lint:
+    run: golangci-lint run ./...
+  test:
+    run: go test -race -count=1 ./...
+  # Offline check that every action used by a workflow is pinned in
+  # .github/workflows/actions.lock (requires `gh extension install github/gh-actions-lock`).
+  actions-lock:
+    run: gh actions-lock --verify-local
+
+branches:
+  - match: "**"
+    tasks: [lint, test, actions-lock]
+
+record:
+  branch: uki/records
+  remote: origin
+  # Only SSH signatures are verified by `uki mark`. To enable, sign with an SSH
+  # key (git config gpg.format ssh) and add it to .uki/allowed_signers:
+  # sign: true
+  # allowed_signers: .uki/allowed_signers
+
+status:
+  context: uki

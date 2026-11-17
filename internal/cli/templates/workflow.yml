@@ -1,0 +1,51 @@
+# Marks commit statuses from uki records.
+#
+# - Push to a work branch: looks up the record for the branch head.
+# - Push to the records branch: marks every commit whose record changed.
+# Whichever arrives last sets the final status, so push order does not matter.
+#
+# This file must also exist on the records branch (uki copies it there when it
+# creates the branch) so that record pushes trigger it.
+#
+# SECURITY: a push-triggered workflow runs the definition contained in the
+# pushed commit, so anyone who can push can rewrite it. Protect it with
+# CODEOWNERS + required reviews, or enforce it via an organization ruleset
+# ("Require workflows to pass"). For the same reason the job checks out the
+# default branch, so uki.yaml rules and allowed signers come from there.
+name: uki
+
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: uki-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install uki
+        run: go install github.com/moznion/uki/cmd/uki@latest
+
+      # Marks the pushed head commit, or, for a push to the records branch
+      # (record.branch in uki.yaml), every commit whose record changed.
+      - name: Mark commit status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: uki mark --github-event

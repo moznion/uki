@@ -1,0 +1,30 @@
+# A Go project.
+#
+#   uki run            # run what the current branch requires, record the result
+#   uki run test       # run a single task; the result is merged into the record
+
+tasks:
+  fmt:
+    # Fails when any file is not gofmt-ed.
+    run: test -z "$(gofmt -l .)"
+  vet:
+    run: go vet ./...
+  lint:
+    run: golangci-lint run ./...
+  test:
+    run: go test -race ./...
+  integration:
+    run: go test -tags=integration -count=1 ./...
+    env:
+      INTEGRATION_TIMEOUT: "5m"
+
+branches:
+  # The default branch and release branches get the full suite.
+  - match: main
+    tasks: [fmt, vet, lint, test, integration]
+  - match: "release/**"
+    tasks: [fmt, vet, lint, test, integration]
+  # Every other branch: the fast checks. Without a catch-all rule, a branch
+  # that matches nothing stays "pending" and cannot be merged.
+  - match: "**"
+    tasks: [fmt, vet, lint, test]

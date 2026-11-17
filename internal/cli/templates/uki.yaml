@@ -1,0 +1,26 @@
+# uki configuration. See https://github.com/moznion/uki
+tasks:
+  lint:
+    run: go vet ./...
+  test:
+    run: go test ./...
+
+# The first matching rule decides which tasks `uki run` executes and which
+# tasks the GitHub workflow requires before marking a commit as success.
+# `*` and `?` do not cross `/`; `**` matches anything.
+branches:
+  - match: main
+    tasks: [lint, test]
+  - match: "**"
+    tasks: [lint, test]
+
+record:
+  branch: uki/records
+  remote: origin
+  sign: false
+  # Path (on the default branch) to an SSH allowed_signers file. When set,
+  # record commits must carry a valid signature from one of these keys.
+  # allowed_signers: .uki/allowed_signers
+
+status:
+  context: uki
