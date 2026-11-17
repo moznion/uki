@@ -4,6 +4,10 @@
 # - Push to the records branch: marks every commit whose record changed.
 # Whichever arrives last sets the final status, so push order does not matter.
 #
+# Pushes to main are skipped: main is verified by ci.yml, and merge commits
+# created on GitHub never get a uki record, so marking them would leave a
+# permanent pending status.
+#
 # This file must also exist on the records branch (uki copies it there when it
 # creates the branch) so that record pushes trigger it.
 #
@@ -16,7 +20,7 @@ name: uki
 
 on:
   push:
-    branches: ["**"]
+    branches: ["**", "!main"]
 
 permissions:
   contents: read
