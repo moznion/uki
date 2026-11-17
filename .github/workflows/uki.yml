@@ -20,7 +20,7 @@ name: uki
 
 on:
   push:
-    branches: ["**", "!main"]
+    branches: ["**", "!main", "!tagpr-from-v*"]
 
 permissions:
   contents: read
