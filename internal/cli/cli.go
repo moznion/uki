@@ -94,6 +94,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		err = a.initCmd(args[1:])
 	case "config":
 		err = a.configCmd(args[1:])
+	case "artifact":
+		err = a.artifactCmd(args[1:])
 	case "version", "--version":
 		fmt.Fprintln(stdout, version())
 	case "-h", "--help", "help":
@@ -119,11 +121,12 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `uki - run CI locally, publish the results to GitHub
 
 Usage:
-  uki run [flags] [task...]   run tasks (default: tasks for the current branch) and record the result
-  uki status [flags]          show the record and verdict for HEAD (exit 0=success, 1=failure/error, 3=pending)
-  uki mark [flags]            (GitHub Actions) set commit statuses from records
-  uki init                    write uki.yaml and the GitHub workflow
-  uki config get <key>        print a setting from uki.yaml (e.g. record.branch)
+  uki run [flags] [task...]       run tasks (default: tasks for the current branch) and record the result
+  uki status [flags]              show the record and verdict for HEAD (exit 0=success, 1=failure/error, 3=pending)
+  uki mark [flags]                (GitHub Actions) set commit statuses from records
+  uki init                        write uki.yaml and the GitHub workflow
+  uki artifact get <task> <path>  print an artifact a task stored with the record (checked against its digest)
+  uki config get <key>            print a setting from uki.yaml (e.g. record.branch)
   uki version
 
 Run "uki <command> -h" for flags.

@@ -54,7 +54,7 @@ func readRecord(t *testing.T, dir, sha string) *record.Record {
 func TestSaveCreatesOrphanBranch(t *testing.T) {
 	_, dir, sha, tree := setup(t)
 	results := map[string]record.TaskResult{"lint": {Command: "true", Success: true, ConfigSHA256: "c"}}
-	if err := newRecorder(dir).Save(sha, tree, results); err != nil {
+	if err := newRecorder(dir).Save(sha, tree, results, nil); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Git(t, dir, "fetch", "--quiet", "origin", "uki/records")
@@ -98,13 +98,13 @@ func TestSaveCreatesOrphanBranch(t *testing.T) {
 func TestSaveMergesIntoExistingRecord(t *testing.T) {
 	_, dir, sha, tree := setup(t)
 	rec := newRecorder(dir)
-	if err := rec.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: false, ExitCode: 1}}); err != nil {
+	if err := rec.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: false, ExitCode: 1}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := rec.Save(sha, tree, map[string]record.TaskResult{"test": {Success: true}}); err != nil {
+	if err := rec.Save(sha, tree, map[string]record.TaskResult{"test": {Success: true}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := rec.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}); err != nil {
+	if err := rec.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	r := readRecord(t, dir, sha)
@@ -137,7 +137,7 @@ func TestSaveConcurrentClonesAllLand(t *testing.T) {
 			r := newRecorder(tg.dir)
 			r.MaxTries = 20
 			r.Log = &logs[i]
-			errs[i] = r.Save(tg.sha, tg.tree, map[string]record.TaskResult{"lint": {Success: true}})
+			errs[i] = r.Save(tg.sha, tg.tree, map[string]record.TaskResult{"lint": {Success: true}}, nil)
 		})
 	}
 	wg.Wait()
@@ -164,7 +164,7 @@ func TestSaveSigns(t *testing.T) {
 
 	r := newRecorder(dir)
 	r.Sign = true
-	if err := r.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}); err != nil {
+	if err := r.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Git(t, dir, "fetch", "--quiet", "origin", "uki/records")
@@ -181,7 +181,7 @@ func TestSaveSkipsPrePushHook(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, ".git/hooks/pre-push"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := newRecorder(dir).Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}); err != nil {
+	if err := newRecorder(dir).Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, nil); err != nil {
 		t.Fatalf("Save blocked by pre-push hook: %v", err)
 	}
 }
@@ -189,7 +189,7 @@ func TestSaveSkipsPrePushHook(t *testing.T) {
 func TestSaveRejectsInvalidSHA(t *testing.T) {
 	_, dir, _, tree := setup(t)
 	for _, bad := range []string{"", "HEAD", "abc", "../../etc/passwd"} {
-		if err := newRecorder(dir).Save(bad, tree, nil); err == nil {
+		if err := newRecorder(dir).Save(bad, tree, nil, nil); err == nil {
 			t.Errorf("Save(%q) succeeded", bad)
 		}
 	}
@@ -199,7 +199,46 @@ func TestSaveFailsWithoutRemote(t *testing.T) {
 	_, dir, sha, tree := setup(t)
 	r := newRecorder(dir)
 	r.Remote = "nope"
-	if err := r.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}); err == nil {
+	if err := r.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, nil); err == nil {
 		t.Error("expected error for unknown remote")
+	}
+}
+
+func TestSaveReplacesArtifactsOfRerunTasksOnly(t *testing.T) {
+	_, dir, sha, tree := setup(t)
+	src := filepath.Join(t.TempDir(), "src")
+	if err := os.WriteFile(src, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := map[string]record.Artifact{"out/a.txt": {SHA256: "x", Size: 4}}
+	rec := newRecorder(dir)
+	results := map[string]record.TaskResult{
+		"lint": {Success: true, Artifacts: meta},
+		"test": {Success: true, Artifacts: meta},
+	}
+	files := recorder.Artifacts{"lint": {"out/a.txt": src}, "test": {"out/a.txt": src}}
+	if err := rec.Save(sha, tree, results, files); err != nil {
+		t.Fatal(err)
+	}
+	// lint runs again and produces nothing: its old artifact goes, test's stays.
+	if err := rec.Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, dir, "fetch", "--quiet", "origin", "+refs/heads/uki/records:refs/remotes/origin/uki/records")
+	got := testutil.Git(t, dir, "ls-tree", "-r", "--name-only", "origin/uki/records", "artifacts/")
+	if want := record.ArtifactPath(sha, "test", "out/a.txt"); got != want {
+		t.Errorf("artifacts = %q, want %q", got, want)
+	}
+	if r := readRecord(t, dir, sha); len(r.Tasks["lint"].Artifacts) != 0 || len(r.Tasks["test"].Artifacts) != 1 {
+		t.Errorf("record artifacts: %+v", r.Tasks)
+	}
+}
+
+func TestSaveRejectsUnlistedArtifacts(t *testing.T) {
+	_, dir, sha, tree := setup(t)
+	files := recorder.Artifacts{"lint": {"out/a.txt": "/nonexistent"}}
+	err := newRecorder(dir).Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, files)
+	if err == nil || !strings.Contains(err.Error(), "not listed in the result") {
+		t.Errorf("err = %v", err)
 	}
 }

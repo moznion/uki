@@ -30,3 +30,10 @@ func TestMerge(t *testing.T) {
 		t.Errorf("record for a different SHA must not be merged: %+v", got.Tasks)
 	}
 }
+
+func TestArtifactPath(t *testing.T) {
+	sha := "712eb857f9862490b5c79d40fbdd7f1c8767be51"
+	if got, want := ArtifactPath(sha, "test", "api/coverage.out"), "artifacts/71/"+sha+"/test/api/coverage.out"; got != want {
+		t.Errorf("ArtifactPath = %q, want %q", got, want)
+	}
+}

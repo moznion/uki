@@ -61,21 +61,8 @@ func (a *app) statusCmd(args []string) (int, error) {
 			return 1, fmt.Errorf("allowed_signers: %w", err)
 		}
 	}
-	localRef := "refs/remotes/" + cfg.Record.Remote + "/" + cfg.Record.Branch
-	if *noFetch {
-		if _, err := g.ResolveCommit(localRef); err == nil {
-			m.recordsRef = localRef
-		}
-	} else {
-		exists, err := g.RemoteBranchExists(cfg.Record.Remote, cfg.Record.Branch)
-		if err != nil {
-			return 1, err
-		}
-		if exists {
-			if m.recordsRef, err = g.FetchBranch(cfg.Record.Remote, cfg.Record.Branch); err != nil {
-				return 1, err
-			}
-		}
+	if m.recordsRef, err = recordsRef(g, cfg, *noFetch); err != nil {
+		return 1, err
 	}
 
 	v, rec, err := m.evaluate(sha, branch)
@@ -130,6 +117,14 @@ func printTasks(w io.Writer, rec *record.Record) {
 		fmt.Fprintf(w, "  %-*s  %-16s %8s  %s  %s/%s\n", width, n, result,
 			(time.Duration(t.DurationMS) * time.Millisecond).String(),
 			t.StartedAt.Local().Format(time.DateTime), t.OS, t.Arch)
+		paths := make([]string, 0, len(t.Artifacts))
+		for p := range t.Artifacts {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		for _, p := range paths {
+			fmt.Fprintf(w, "  %-*s  artifact %s (%s)\n", width, "", p, humanBytes(t.Artifacts[p].Size))
+		}
 	}
 }
 
@@ -151,4 +146,17 @@ func (a *app) warnIfRulesDiffer(g gitx.Git, cfg *config.Config) {
 	if sha256Hex(remote) != sha256Hex(local) {
 		a.warn(fmt.Sprintf("local %s differs from %s; GitHub evaluates with the latter", config.FileName, head))
 	}
+}
+
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }

@@ -30,6 +30,15 @@ type TaskResult struct {
 	OS         string `json:"os"`
 	Arch       string `json:"arch"`
 	UkiVersion string `json:"uki_version"`
+	// Artifacts maps each stored artifact (its repository-relative path) to
+	// its digest. The content lives at ArtifactPath on the records branch.
+	Artifacts map[string]Artifact `json:"artifacts,omitempty"`
+}
+
+// Artifact describes one file a task produced, as stored on the records branch.
+type Artifact struct {
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
 }
 
 // ValidSHA reports whether s is a full lowercase SHA-1 or SHA-256 object name.
@@ -49,6 +58,18 @@ func ValidSHA(s string) bool {
 // sha must satisfy ValidSHA.
 func Path(sha string) string {
 	return fmt.Sprintf("records/%s/%s.json", sha[:2], sha)
+}
+
+// ArtifactDir is the directory holding every artifact of task for sha.
+// sha must satisfy ValidSHA and task config.ValidArtifactTaskName.
+func ArtifactDir(sha, task string) string {
+	return fmt.Sprintf("artifacts/%s/%s/%s", sha[:2], sha, task)
+}
+
+// ArtifactPath is where the artifact at the repository-relative path p of
+// task is stored for sha.
+func ArtifactPath(sha, task, p string) string {
+	return ArtifactDir(sha, task) + "/" + p
 }
 
 func Parse(b []byte) (*Record, error) {

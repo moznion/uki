@@ -57,6 +57,9 @@ func (a *app) runCmd(args []string) (int, error) {
 			return 1, fmt.Errorf("unknown task %q", t)
 		}
 	}
+	if err := checkArtifactsUntracked(g, cfg, tasks); err != nil {
+		return 1, err
+	}
 
 	sha, err := g.ResolveCommit("HEAD")
 	if err != nil {
@@ -75,11 +78,25 @@ func (a *app) runCmd(args []string) (int, error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	var stage *artifactStage
+	if doRecord {
+		if stage, err = newArtifactStage(top, cfg.Record.MaxArtifactBytes); err != nil {
+			return 1, err
+		}
+		defer stage.cleanup()
+	}
+
 	var results []runner.Result
 	failed := false
 	for _, name := range tasks {
 		res := runner.Run(ctx, top, name, cfg.Tasks[name], a.stdout, a.stderr)
 		results = append(results, res)
+		// Collect right away: a later task may overwrite or remove the files.
+		if stage != nil && ctx.Err() == nil {
+			if err := stage.collect(name, cfg.Tasks[name].Artifacts, a.warn); err != nil {
+				return 1, err
+			}
+		}
 		if !res.Success {
 			failed = true
 			if *failFast || ctx.Err() != nil {
@@ -111,14 +128,14 @@ func (a *app) runCmd(args []string) (int, error) {
 		return code, nil
 	}
 
-	if err := a.save(g, cfg, sha, branch, results); err != nil {
+	if err := a.save(g, cfg, sha, branch, results, stage); err != nil {
 		return 1, fmt.Errorf("record: %w", err)
 	}
 	fmt.Fprintf(a.stderr, "uki: recorded %s to %s/%s\n", sha[:12], cfg.Record.Remote, cfg.Record.Branch)
 	return code, nil
 }
 
-func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results []runner.Result) error {
+func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results []runner.Result, stage *artifactStage) error {
 	tree, err := g.TreeOf(sha)
 	if err != nil {
 		return err
@@ -143,6 +160,7 @@ func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results [
 			OS:           runtime.GOOS,
 			Arch:         runtime.GOARCH,
 			UkiVersion:   version(),
+			Artifacts:    stage.meta[r.Name],
 		}
 	}
 	return recorder.Recorder{
@@ -152,5 +170,5 @@ func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results [
 		Sign:      cfg.Record.Sign,
 		SeedFiles: []string{WorkflowPath, ActionsLockPath},
 		Log:       a.stderr,
-	}.Save(sha, tree, m)
+	}.Save(sha, tree, m, stage.files)
 }

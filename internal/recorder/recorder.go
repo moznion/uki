@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moznion/uki/internal/config"
 	"github.com/moznion/uki/internal/gitx"
 	"github.com/moznion/uki/internal/record"
 	"github.com/moznion/uki/internal/repofile"
@@ -31,9 +32,16 @@ type Recorder struct {
 	Log io.Writer
 }
 
+// Artifacts maps a task name to its artifacts: each repository-relative path
+// (as listed in the record) to a local file holding the content to store.
+type Artifacts map[string]map[string]string
+
 // Save merges results into the record for sha and pushes it, retrying on
 // non-fast-forward by re-fetching and re-applying the merge.
-func (r Recorder) Save(sha, tree string, results map[string]record.TaskResult) error {
+//
+// Every task in results replaces its stored artifacts with the ones in
+// artifacts (none if it has no entry), so a re-run never leaves stale files.
+func (r Recorder) Save(sha, tree string, results map[string]record.TaskResult, artifacts Artifacts) error {
 	if !record.ValidSHA(sha) {
 		return fmt.Errorf("invalid commit SHA %q", sha)
 	}
@@ -106,6 +114,9 @@ func (r Recorder) Save(sha, tree string, results map[string]record.TaskResult) e
 		if err := r.writeRecord(dir, sha, tree, results, !exists); err != nil {
 			return err
 		}
+		if err := writeArtifacts(dir, sha, results, artifacts); err != nil {
+			return err
+		}
 		if _, err := wt.Run("add", "-A"); err != nil {
 			return err
 		}
@@ -163,6 +174,57 @@ func (r Recorder) writeRecord(dir, sha, tree string, results map[string]record.T
 		}
 	}
 	return nil
+}
+
+func writeArtifacts(dir, sha string, results map[string]record.TaskResult, artifacts Artifacts) error {
+	for task := range results {
+		// Drop what an earlier run of the task stored for this commit.
+		if config.ValidArtifactTaskName(task) {
+			if err := os.RemoveAll(filepath.Join(dir, filepath.FromSlash(record.ArtifactDir(sha, task)))); err != nil {
+				return err
+			}
+		}
+		files := artifacts[task]
+		if len(files) == 0 {
+			continue
+		}
+		if !config.ValidArtifactTaskName(task) {
+			return fmt.Errorf("task %q cannot store artifacts", task)
+		}
+		for p, src := range files {
+			if !config.ValidArtifactPath(p) {
+				return fmt.Errorf("task %q: invalid artifact path %q", task, p)
+			}
+			if _, ok := results[task].Artifacts[p]; !ok {
+				return fmt.Errorf("task %q: artifact %q is not listed in the result", task, p)
+			}
+			dst := filepath.Join(dir, filepath.FromSlash(record.ArtifactPath(sha, task, p)))
+			if err := copyFile(src, dst); err != nil {
+				return fmt.Errorf("store artifact %s of %s: %w", p, task, err)
+			}
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src) //nolint:gosec // src is a file uki staged itself
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil { //nolint:gosec // tracked files on the records branch; see repofile
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644) //nolint:gosec // see above
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func commitMessage(sha, tree string, results map[string]record.TaskResult) string {
