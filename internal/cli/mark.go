@@ -14,6 +14,7 @@ import (
 	"github.com/moznion/uki/internal/config"
 	"github.com/moznion/uki/internal/github"
 	"github.com/moznion/uki/internal/gitx"
+	"github.com/moznion/uki/internal/inputs"
 	"github.com/moznion/uki/internal/record"
 	"github.com/moznion/uki/internal/verify"
 )
@@ -240,6 +241,23 @@ func (m marker) evaluate(sha, branch string) (verify.Verdict, *record.Record, er
 	}
 
 	required, matched := m.cfg.TasksForBranch(branch)
+	var invalidReuse map[string]bool
+	if rec != nil && sigErr == nil && rec.SHA == sha {
+		trees := map[string]*inputs.Tree{}
+		for _, name := range required {
+			res, ok := rec.Tasks[name]
+			if !ok || res.ReusedFrom == "" {
+				continue
+			}
+			if err := m.checkReuse(sha, cfgHash, name, res, trees); err != nil {
+				fmt.Fprintf(m.errOut, "uki: [%s] reused result is not valid: %v\n", name, err)
+				if invalidReuse == nil {
+					invalidReuse = map[string]bool{}
+				}
+				invalidReuse[name] = true
+			}
+		}
+	}
 	return verify.Evaluate(verify.Input{
 		SHA:            sha,
 		Tree:           tree,
@@ -248,6 +266,7 @@ func (m marker) evaluate(sha, branch string) (verify.Verdict, *record.Record, er
 		NoMatchingRule: !matched,
 		Record:         rec,
 		SignatureErr:   sigErr,
+		InvalidReuse:   invalidReuse,
 	}), rec, nil
 }
 

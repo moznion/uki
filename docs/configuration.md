@@ -3,11 +3,15 @@
 uki is configured by `uki.yaml` at the repository root. `uki init` writes a starting point.
 
 ```yaml
+inputs: [<glob>, ...]  # added to the inputs of every task that declares its own
+
 tasks:            # what can be run
   <name>:
     run: <shell command>
     env:
       <KEY>: <value>
+    inputs: [<glob>, ...]     # files the result depends on (enables reuse)
+    artifacts: [<path>, ...]  # files stored with the record
 
 branches:         # which tasks each branch requires (first match wins)
   - match: <glob>
@@ -18,6 +22,7 @@ record:           # where and how results are stored
   remote: origin
   sign: false
   allowed_signers: <path>
+  max_artifact_bytes: 10485760
 
 status:           # how results appear on GitHub
   context: uki
@@ -46,6 +51,7 @@ A map from task name to task definition. Task names are free-form strings and ar
 | `run` | string | yes | Command executed with `sh -c`, from the repository root. |
 | `env` | map of string to string | no | Extra environment variables. They are added on top of the environment `uki` was started with. |
 | `artifacts` | list of strings | no | Files the task produces that are stored with the record (see [Artifacts](#artifacts)). |
+| `inputs` | list of globs | no | Files the task's result depends on. A passing result recorded for the same inputs is reused instead of running the task again (see [Inputs and reuse](#inputs-and-reuse)). Without it the task always runs. |
 
 A task passes when its command exits with status `0`.
 
@@ -91,6 +97,37 @@ tasks:
 - Nothing is stored with `--no-record`, or when the run is not recorded for any other reason.
 
 Artifacts are published to everyone who can read the repository, and they stay in the history of the records branch. Do not list files that may contain secrets.
+
+### Inputs and reuse
+
+A task that declares `inputs` is not run again when nothing it depends on has changed: `uki run` reuses a passing result recorded for another commit with the same inputs, and records it for `HEAD` as reused.
+
+```yaml
+inputs: [go.mod, go.sum, .tool-versions]  # shared by every task with inputs
+
+tasks:
+  backend-test:
+    run: go test ./backend/...
+    inputs: ["backend/**", "schema/**"]
+  frontend-test:
+    run: npm test --prefix frontend
+    inputs: ["frontend/**"]
+  vuln:
+    run: govulncheck ./...   # no inputs: always runs
+```
+
+How it works:
+
+- Patterns use the [glob syntax](#glob-syntax) of branch rules (`*` and `?` stay within one directory, `**` crosses them), matched against repository-relative paths. There is no negation.
+- The top-level `inputs` are added to every task that declares its own. Tasks without `inputs` ignore them and always run.
+- The inputs key of a task at a commit is the SHA-256 of: the commit's `uki.yaml`, the task name, and the mode, object id and path of every committed file the patterns match (submodules count by their commit). It is computed from the commit with `git ls-tree`; the working tree is not read. Any change to `uki.yaml`, even a comment, therefore re-runs every task.
+- After a real, passing run, the key is indexed on the records branch at `inputs/<first two hex chars>/<key>.json`, pointing at the commit. Failures and reused results are not indexed.
+- `uki run` looks the key up before running each task. Any commit can be the source: an ancestor, a commit you rebased away from, or one recorded by someone else. A reused result keeps the original command, outcome, log digest and [artifacts](#artifacts), and adds `reused_from` (always the commit the task really ran on).
+- Re-running the same commit runs the task again. `uki run --no-reuse` runs everything (its results are still indexed), and `--no-record` never reuses.
+
+On GitHub, `uki mark` checks every reused result with the default branch's `uki.yaml`: the task must declare `inputs` there, the commit it came from must have a real passing run, and the files matched by the default branch's patterns, as well as `uki.yaml` itself, must be identical in both commits. Otherwise the status is `error`, so a work branch cannot narrow its own inputs to skip tasks.
+
+Declare everything the result depends on. A missing input means a stale pass: if `backend-test` also reads `shared/`, but `shared/**` is not listed, a change there is never tested until something listed changes. Leave out `inputs` for tasks whose result depends on things outside the repository, such as vulnerability databases, base images or package registries, so they always run.
 
 ## `branches`
 

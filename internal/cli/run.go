@@ -21,6 +21,7 @@ func (a *app) runCmd(args []string) (int, error) {
 	noRecord := fs.Bool("no-record", false, "run tasks without recording the result")
 	failFast := fs.Bool("fail-fast", false, "stop at the first failing task")
 	branchFlag := fs.String("branch", "", "branch name used for rule matching (default: current branch)")
+	noReuse := fs.Bool("no-reuse", false, "run every task even when a passing result for the same inputs is recorded")
 	if err := a.parse(fs, args); err != nil {
 		return 2, err
 	}
@@ -78,6 +79,17 @@ func (a *app) runCmd(args []string) (int, error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// Keys are computed whenever the result is recorded, so a real run indexes
+	// its inputs even with --no-reuse. Results are reused only when recording:
+	// a --no-record run (e.g. CI that sets statuses itself) always runs.
+	var ru *reuser
+	if doRecord {
+		if ru, err = newReuser(g, cfg, sha, !*noReuse); err != nil {
+			return 1, err
+		}
+	}
+	reused := map[string]record.TaskResult{}
+
 	var stage *artifactStage
 	if doRecord {
 		if stage, err = newArtifactStage(top, cfg.Record.MaxArtifactBytes); err != nil {
@@ -89,6 +101,18 @@ func (a *app) runCmd(args []string) (int, error) {
 	var results []runner.Result
 	failed := false
 	for _, name := range tasks {
+		if ru != nil {
+			r, ok, err := ru.find(name, branch)
+			if err != nil {
+				return 1, err
+			}
+			if ok {
+				fmt.Fprintf(a.stderr, "==> [%s] reused the passing result of %s (inputs unchanged)\n", name, short(r.ReusedFrom))
+				reused[name] = r
+				continue
+			}
+		}
+		delete(reused, name)
 		res := runner.Run(ctx, top, name, cfg.Tasks[name], a.stdout, a.stderr)
 		results = append(results, res)
 		// Collect right away: a later task may overwrite or remove the files.
@@ -128,14 +152,14 @@ func (a *app) runCmd(args []string) (int, error) {
 		return code, nil
 	}
 
-	if err := a.save(g, cfg, sha, branch, results, stage); err != nil {
+	if err := a.save(g, cfg, sha, branch, results, reused, ru, stage); err != nil {
 		return 1, fmt.Errorf("record: %w", err)
 	}
 	fmt.Fprintf(a.stderr, "uki: recorded %s to %s/%s\n", sha[:12], cfg.Record.Remote, cfg.Record.Branch)
 	return code, nil
 }
 
-func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results []runner.Result, stage *artifactStage) error {
+func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results []runner.Result, reused map[string]record.TaskResult, ru *reuser, stage *artifactStage) error {
 	tree, err := g.TreeOf(sha)
 	if err != nil {
 		return err
@@ -146,7 +170,10 @@ func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results [
 	}
 	cfgHash := sha256Hex(cfgBytes)
 
-	m := make(map[string]record.TaskResult, len(results))
+	m := make(map[string]record.TaskResult, len(results)+len(reused))
+	for name, r := range reused {
+		m[name] = r
+	}
 	for _, r := range results {
 		m[r.Name] = record.TaskResult{
 			Command:      r.Command,
@@ -161,6 +188,7 @@ func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results [
 			Arch:         runtime.GOARCH,
 			UkiVersion:   version(),
 			Artifacts:    stage.meta[r.Name],
+			InputsSHA256: ru.key(r.Name),
 		}
 	}
 	return recorder.Recorder{

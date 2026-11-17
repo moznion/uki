@@ -2,6 +2,7 @@
 package recorder
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -117,6 +118,9 @@ func (r Recorder) Save(sha, tree string, results map[string]record.TaskResult, a
 		if err := writeArtifacts(dir, sha, results, artifacts); err != nil {
 			return err
 		}
+		if err := writeIndex(dir, sha, results); err != nil {
+			return err
+		}
 		if _, err := wt.Run("add", "-A"); err != nil {
 			return err
 		}
@@ -207,6 +211,28 @@ func writeArtifacts(dir, sha string, results map[string]record.TaskResult, artif
 	return nil
 }
 
+// writeIndex points the inputs key of every passing, actually-run result at
+// sha, so later runs with the same inputs can reuse it. Failures and reused
+// results are not indexed: only a real run vouches for its inputs.
+func writeIndex(dir, sha string, results map[string]record.TaskResult) error {
+	for task, res := range results {
+		if !res.Success || res.ReusedFrom != "" || res.InputsSHA256 == "" {
+			continue
+		}
+		if !record.ValidKey(res.InputsSHA256) {
+			return fmt.Errorf("task %q: invalid inputs key %q", task, res.InputsSHA256)
+		}
+		b, err := json.Marshal(record.IndexEntry{SHA: sha, Task: task})
+		if err != nil {
+			return err
+		}
+		if err := repofile.Write(filepath.Join(dir, filepath.FromSlash(record.IndexPath(res.InputsSHA256))), append(b, '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src) //nolint:gosec // src is a file uki staged itself
 	if err != nil {
@@ -247,8 +273,12 @@ func commitMessage(sha, tree string, results map[string]record.TaskResult) strin
 	fmt.Fprintf(&b, "Uki-Tree: %s\n", tree)
 	for _, n := range names {
 		res := results[n]
-		fmt.Fprintf(&b, "Uki-Task: %s success=%t exit=%d config=%s log=%s\n",
+		fmt.Fprintf(&b, "Uki-Task: %s success=%t exit=%d config=%s log=%s",
 			n, res.Success, res.ExitCode, res.ConfigSHA256, res.LogSHA256)
+		if res.ReusedFrom != "" {
+			fmt.Fprintf(&b, " reused=%s", res.ReusedFrom)
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }

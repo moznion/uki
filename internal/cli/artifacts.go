@@ -246,7 +246,15 @@ func (m marker) artifact(sha, task, path string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("task %q of %s stored no artifact %s", task, short(sha), path)
 	}
-	b, err := m.g.Show(m.recordsRef, record.ArtifactPath(sha, task, path))
+	// A reused result points at the artifacts of the run it came from.
+	from := sha
+	if res.ReusedFrom != "" {
+		if !record.ValidSHA(res.ReusedFrom) {
+			return nil, fmt.Errorf("invalid reused_from %q", res.ReusedFrom)
+		}
+		from = res.ReusedFrom
+	}
+	b, err := m.g.Show(m.recordsRef, record.ArtifactPath(from, task, path))
 	if errors.Is(err, gitx.ErrNotFound) {
 		return nil, fmt.Errorf("artifact %s of task %q is listed in the record but missing from the records branch", path, task)
 	} else if err != nil {

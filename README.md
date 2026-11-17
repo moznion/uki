@@ -82,6 +82,7 @@ Runs tasks at the repository root and records the result for `HEAD`.
 - Tasks run sequentially in the listed order. All of them run even if one fails, unless `--fail-fast` is given.
 - Both successes and failures are recorded.
 - Files listed in a task's [`artifacts`](docs/configuration.md#artifacts) are stored with the record; read them back with `uki artifact get`.
+- A task with [`inputs`](docs/configuration.md#inputs-and-reuse) is not run when a passing result for the same inputs is already recorded (for any commit); the result is recorded for `HEAD` as reused.
 
 The result is **not** recorded (a warning is printed and the tasks still run) when:
 
@@ -94,7 +95,8 @@ The result is **not** recorded (a warning is printed and the tasks still run) wh
 |---|---|
 | `--branch <name>` | Branch name used for rule matching. Defaults to the current branch; required on a detached `HEAD` unless task names are given. |
 | `--fail-fast` | Stop at the first failing task. |
-| `--no-record` | Run without recording. |
+| `--no-record` | Run without recording. Results are never reused in this mode. |
+| `--no-reuse` | Run every task, even when a passing result for the same inputs is recorded. |
 
 Exit code: `0` if every task passed, `1` if any task failed or uki itself failed, `2` for usage errors, `130` when interrupted.
 
@@ -106,13 +108,13 @@ Shows the record and the verdict for a commit, using exactly the same evaluation
 $ uki status
 commit  1606b4d401f6 (main)
 record  origin/uki/records:records/16/1606b4d401f6c6c84c3247d106d2878ab0baf680.json
-  lint  ok                    3ms  2026-11-17 09:47:16  darwin/arm64
-  test  ok                  211ms  2026-11-17 09:47:16  darwin/arm64
+  lint  ok (reused 7c1e0a94b2d3)       0s  2026-11-17 09:47:16  darwin/arm64
+  test  ok                       211ms  2026-11-17 09:47:16  darwin/arm64
         artifact coverage.out (47.1 KiB)
 status  success: Passed: lint, test
 ```
 
-Stored [artifacts](docs/configuration.md#artifacts) are listed under their task.
+Reused results name the commit they came from, and stored [artifacts](docs/configuration.md#artifacts) are listed under their task.
 
 It warns when the working tree is dirty, and when the local `uki.yaml` differs from the one on the remote default branch (`origin/HEAD`), because GitHub evaluates with the latter.
 
@@ -193,6 +195,7 @@ For a commit pushed to a branch, the required tasks are those of the first branc
 | The matching rule lists no tasks (`tasks: []`) and a record exists | `success` |
 | The record's tree does not match the commit | `error` |
 | A task ran with a different `uki.yaml` than the one in the commit | `error` |
+| A reused result does not verify with the default branch's `inputs` | `error` |
 | Signature verification is enabled and fails | `error` |
 
 On a push to the records branch, the branch name is taken from the record itself: the branch of the most recently started task.
@@ -224,6 +227,8 @@ Records live on an orphan branch (default `uki/records`) that shares no history 
 ```
 
 `config_sha256` is the SHA-256 of `uki.yaml` at the recorded commit; `log_sha256` is the SHA-256 of the task's combined stdout and stderr. The output itself is not stored.
+
+A task with [`inputs`](docs/configuration.md#inputs-and-reuse) also records `inputs_sha256`, its inputs key; a reused result adds `reused_from`, the commit the task really ran on (see the link for the `inputs/` index that makes reuse possible).
 
 A task with [artifacts](docs/configuration.md#artifacts) also lists them in its result, keyed by their repository-relative path:
 
