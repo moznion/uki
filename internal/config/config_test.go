@@ -171,3 +171,28 @@ func TestInputMatcher(t *testing.T) {
 		}
 	}
 }
+
+func TestParseJobsAndLocks(t *testing.T) {
+	c, err := Parse([]byte(`tasks: { lint: { run: x, locks: [golangci-lint] } }`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Jobs != 1 {
+		t.Errorf("default jobs = %d, want 1", c.Jobs)
+	}
+	if !reflect.DeepEqual(c.Tasks["lint"].Locks, []string{"golangci-lint"}) {
+		t.Errorf("locks = %v", c.Tasks["lint"].Locks)
+	}
+	if c, err := Parse([]byte("jobs: 4")); err != nil || c.Jobs != 4 {
+		t.Errorf("jobs: 4 -> %v, %v", c, err)
+	}
+	for _, cfg := range []string{
+		`jobs: -1`,
+		`tasks: { t: { run: x, locks: [""] } }`,
+		`tasks: { t: { run: x, locks: [a, a] } }`,
+	} {
+		if _, err := Parse([]byte(cfg)); err == nil {
+			t.Errorf("%s: expected an error", cfg)
+		}
+	}
+}

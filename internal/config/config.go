@@ -29,11 +29,14 @@ type Config struct {
 	// editor settings, ...). Files matched neither by any task's inputs nor
 	// by these count as inputs of every task, so changing an unclassified
 	// file never lets a result be reused.
-	Irrelevant []string        `yaml:"irrelevant"`
-	Tasks      map[string]Task `yaml:"tasks"`
-	Branches   []BranchRule    `yaml:"branches"`
-	Record     RecordConfig    `yaml:"record"`
-	Status     StatusConfig    `yaml:"status"`
+	Irrelevant []string `yaml:"irrelevant"`
+	// Jobs is how many tasks `uki run` runs at the same time; 0 means 1.
+	// `uki run -j` overrides it.
+	Jobs     int             `yaml:"jobs"`
+	Tasks    map[string]Task `yaml:"tasks"`
+	Branches []BranchRule    `yaml:"branches"`
+	Record   RecordConfig    `yaml:"record"`
+	Status   StatusConfig    `yaml:"status"`
 }
 
 type Task struct {
@@ -47,6 +50,10 @@ type Task struct {
 	// `uki run` reuses a passing result recorded for the same inputs instead
 	// of running the task again. Without it the task always runs.
 	Inputs []string `yaml:"inputs"`
+	// Locks name resources the task needs to itself: tasks sharing a lock
+	// never run at the same time (e.g. a tool that refuses concurrent runs,
+	// or a check that rewrites files other tasks read).
+	Locks []string `yaml:"locks"`
 }
 
 // BranchRule maps a branch glob to the tasks required on matching branches.
@@ -144,6 +151,24 @@ func (c *Config) validate() error {
 				return fmt.Errorf("task %q: artifact %q is listed twice", name, a)
 			}
 			seen[a] = true
+		}
+	}
+	if c.Jobs < 0 {
+		return errors.New("jobs must not be negative")
+	}
+	if c.Jobs == 0 {
+		c.Jobs = 1
+	}
+	for name, t := range c.Tasks {
+		seen := map[string]bool{}
+		for _, l := range t.Locks {
+			if l == "" {
+				return fmt.Errorf("task %q: lock names must not be empty", name)
+			}
+			if seen[l] {
+				return fmt.Errorf("task %q: lock %q is listed twice", name, l)
+			}
+			seen[l] = true
 		}
 	}
 	if c.Record.MaxArtifactBytes < 0 {

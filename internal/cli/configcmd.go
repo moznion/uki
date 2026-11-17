@@ -19,6 +19,7 @@ var configKeys = map[string]func(*config.Config) string{
 	"record.sign":               func(c *config.Config) string { return strconv.FormatBool(c.Record.Sign) },
 	"record.allowed_signers":    func(c *config.Config) string { return c.Record.AllowedSigners },
 	"record.max_artifact_bytes": func(c *config.Config) string { return strconv.FormatInt(c.Record.MaxArtifactBytes, 10) },
+	"jobs":                      func(c *config.Config) string { return strconv.Itoa(c.Jobs) },
 	"status.context":            func(c *config.Config) string { return c.Status.Context },
 }
 
