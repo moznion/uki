@@ -244,7 +244,7 @@ The record commit message summarizes the result with trailers (`Uki-Target`, `Uk
 
 Records are pushed with `git push --no-verify`: the records branch holds only generated JSON, and running your own `pre-push` hook for it would re-enter hooks that call uki.
 
-Several developers can record at the same time: uki retries rejected pushes with a jittered backoff, re-reading and re-merging the record each time.
+Several developers can record at the same time: when a push is rejected because someone else pushed to the records branch first, uki retries with a jittered backoff, re-reading and re-merging the record each time. A push the remote declines for any other reason (a repository rule, a hook, missing permissions) fails at once instead of being retried.
 
 When uki creates the records branch it copies `.github/workflows/uki.yml` and, if present, the [workflow lockfile](https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles) `.github/workflows/actions.lock` onto it, because pushes to the records branch run the workflow definition found on that branch. Later changes to those files are **not** propagated automatically; update the records branch by hand when you change them.
 

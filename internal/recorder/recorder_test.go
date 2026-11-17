@@ -269,3 +269,29 @@ func TestSaveIndexesOnlyPassingRealRuns(t *testing.T) {
 		t.Errorf("commit message lacks the reuse trailer:\n%s", msg)
 	}
 }
+
+func TestSaveDoesNotRetryDeclinedPush(t *testing.T) {
+	remote, dir, sha, tree := setup(t)
+	// With an existing records branch, a failed push would normally retry.
+	if err := newRecorder(dir).Save(sha, tree, map[string]record.TaskResult{"lint": {Success: true}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The remote now declines every push to the records branch, like a
+	// repository rule would, and counts the attempts.
+	count := filepath.Join(t.TempDir(), "attempts")
+	hook := fmt.Sprintf("#!/bin/sh\necho x >> %q\necho 'declined by rule' >&2\nexit 1\n", count)
+	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := newRecorder(dir).Save(sha, tree, map[string]record.TaskResult{"test": {Success: true}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "declined by rule") {
+		t.Fatalf("err = %v", err)
+	}
+	b, rerr := os.ReadFile(count)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if n := strings.Count(string(b), "x"); n != 1 {
+		t.Errorf("pushed %d times, want 1", n)
+	}
+}
