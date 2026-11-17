@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.3](https://github.com/moznion/uki/compare/v0.0.2...v0.0.3) - 2026-11-17
+
+- Do not retry record pushes the remote declines by @moznion in https://github.com/moznion/uki/pull/12
+
 ## [v0.0.2](https://github.com/moznion/uki/compare/v0.0.1...v0.0.2) - 2026-11-17
 
 - Count unclassified files as inputs of every task by @moznion in https://github.com/moznion/uki/pull/8
