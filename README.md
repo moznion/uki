@@ -286,3 +286,14 @@ go run ./cmd/uki run
 ```
 
 The tasks are `golangci-lint run`, `go test -race ./...`, and `gh actions-lock --verify-local` (requires `gh extension install github/gh-actions-lock`).
+
+### Before opening a pull request
+
+**Always run `uki run` on the final commit before opening (or updating) a pull request.** The `uki` commit status, and therefore the merge check, comes only from these records; CI does not run the tasks itself.
+
+1. Commit everything. The working tree must be clean, or the result is not recorded.
+2. Run `go run ./cmd/uki run` and make sure every task passes. The record is pushed to `uki/records` automatically.
+3. Push the branch and open the pull request.
+
+Any new `HEAD` (amend, rebase, extra commit, merge of `main`) needs a fresh `uki run` before pushing it.
+
