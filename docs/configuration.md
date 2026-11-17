@@ -3,7 +3,8 @@
 uki is configured by `uki.yaml` at the repository root. `uki init` writes a starting point.
 
 ```yaml
-inputs: [<glob>, ...]  # added to the inputs of every task that declares its own
+inputs: [<glob>, ...]      # added to the inputs of every task that declares its own
+irrelevant: [<glob>, ...]  # files known to affect no task
 
 tasks:            # what can be run
   <name>:
@@ -104,6 +105,7 @@ A task that declares `inputs` is not run again when nothing it depends on has ch
 
 ```yaml
 inputs: [go.mod, go.sum, .tool-versions]  # shared by every task with inputs
+irrelevant: ["docs/**", "*.md", LICENSE]   # changes here re-run nothing
 
 tasks:
   backend-test:
@@ -120,14 +122,15 @@ How it works:
 
 - Patterns use the [glob syntax](#glob-syntax) of branch rules (`*` and `?` stay within one directory, `**` crosses them), matched against repository-relative paths. There is no negation.
 - The top-level `inputs` are added to every task that declares its own. Tasks without `inputs` ignore them and always run.
-- The inputs key of a task at a commit is the SHA-256 of: the commit's `uki.yaml`, the task name, and the mode, object id and path of every committed file the patterns match (submodules count by their commit). It is computed from the commit with `git ls-tree`; the working tree is not read. Any change to `uki.yaml`, even a comment, therefore re-runs every task.
+- Every committed file is either in some task's `inputs`, listed in the top-level `irrelevant`, or unclassified. Unclassified files count as inputs of every task, so adding or changing a file nobody thought about re-runs everything instead of being skipped. List files that really affect no task (documentation, editor settings) in `irrelevant` to avoid those re-runs.
+- The inputs key of a task at a commit is the SHA-256 of: the commit's `uki.yaml`, the task name, and the mode, object id and path of every committed file in its inputs, unclassified files included (submodules count by their commit). It is computed from the commit with `git ls-tree`; the working tree is not read. Any change to `uki.yaml`, even a comment, therefore re-runs every task.
 - After a real, passing run, the key is indexed on the records branch at `inputs/<first two hex chars>/<key>.json`, pointing at the commit. Failures and reused results are not indexed.
 - `uki run` looks the key up before running each task. Any commit can be the source: an ancestor, a commit you rebased away from, or one recorded by someone else. A reused result keeps the original command, outcome, log digest and [artifacts](#artifacts), and adds `reused_from` (always the commit the task really ran on).
 - Re-running the same commit runs the task again. `uki run --no-reuse` runs everything (its results are still indexed), and `--no-record` never reuses.
 
-On GitHub, `uki mark` checks every reused result with the default branch's `uki.yaml`: the task must declare `inputs` there, the commit it came from must have a real passing run, and the files matched by the default branch's patterns, as well as `uki.yaml` itself, must be identical in both commits. Otherwise the status is `error`, so a work branch cannot narrow its own inputs to skip tasks.
+On GitHub, `uki mark` checks every reused result with the default branch's `uki.yaml`: the task must declare `inputs` there, the commit it came from must have a real passing run, and the task's inputs under the default branch's rules (its patterns plus unclassified files), as well as `uki.yaml` itself, must be identical in both commits. Otherwise the status is `error`, so a work branch cannot narrow its own inputs or widen `irrelevant` to skip tasks.
 
-Declare everything the result depends on. A missing input means a stale pass: if `backend-test` also reads `shared/`, but `shared/**` is not listed, a change there is never tested until something listed changes. Leave out `inputs` for tasks whose result depends on things outside the repository, such as vulnerability databases, base images or package registries, so they always run.
+Declare everything the result depends on. A file listed in another task's `inputs` is not an input of this one: if `backend-test` also reads `frontend/api.json`, but only `frontend-test` lists `frontend/**`, a change there reuses `backend-test`'s result. Files that no pattern mentions are safe: they re-run everything. A wrong `irrelevant` entry is not: it hides changes to that file from every task. Leave out `inputs` for tasks whose result depends on things outside the repository, such as vulnerability databases, base images or package registries, so they always run.
 
 ## `branches`
 

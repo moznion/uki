@@ -152,6 +152,7 @@ tasks:
 		`inputs: [/abs]`,
 		`tasks: { t: { run: x, inputs: ["./src/**"] } }`,
 		`tasks: { t: { run: x, inputs: [""] } }`,
+		`irrelevant: [../docs]`,
 	} {
 		if _, err := Parse([]byte(cfg)); err == nil {
 			t.Errorf("%s: expected an error", cfg)

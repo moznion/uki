@@ -24,11 +24,16 @@ const DefaultMaxArtifactBytes = 10 << 20
 type Config struct {
 	// Inputs are file patterns added to the inputs of every task that
 	// declares its own (e.g. tool versions shared by all tasks).
-	Inputs   []string        `yaml:"inputs"`
-	Tasks    map[string]Task `yaml:"tasks"`
-	Branches []BranchRule    `yaml:"branches"`
-	Record   RecordConfig    `yaml:"record"`
-	Status   StatusConfig    `yaml:"status"`
+	Inputs []string `yaml:"inputs"`
+	// Irrelevant are file patterns known to affect no task (documentation,
+	// editor settings, ...). Files matched neither by any task's inputs nor
+	// by these count as inputs of every task, so changing an unclassified
+	// file never lets a result be reused.
+	Irrelevant []string        `yaml:"irrelevant"`
+	Tasks      map[string]Task `yaml:"tasks"`
+	Branches   []BranchRule    `yaml:"branches"`
+	Record     RecordConfig    `yaml:"record"`
+	Status     StatusConfig    `yaml:"status"`
 }
 
 type Task struct {
@@ -111,6 +116,11 @@ func (c *Config) validate() error {
 	for _, p := range c.Inputs {
 		if !validInputPattern(p) {
 			return fmt.Errorf("inputs: pattern %q must be a clean repository-relative path or glob", p)
+		}
+	}
+	for _, p := range c.Irrelevant {
+		if !validInputPattern(p) {
+			return fmt.Errorf("irrelevant: pattern %q must be a clean repository-relative path or glob", p)
 		}
 	}
 	for name, t := range c.Tasks {
