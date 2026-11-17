@@ -137,6 +137,12 @@ func (r Recorder) Save(sha, tree string, results map[string]record.TaskResult, a
 		if _, lastErr = wt.Run("push", "--quiet", "--no-verify", r.Remote, "HEAD:refs/heads/"+r.Branch); lastErr == nil {
 			return nil
 		}
+		// Only a lost race with another recorder is worth retrying. A push the
+		// remote declines (repository rules, hooks, permissions) fails the same
+		// way every time.
+		if !lostRace(lastErr) {
+			return fmt.Errorf("push records: %w", lastErr)
+		}
 	}
 	return fmt.Errorf("push records after %d tries: %w", tries, lastErr)
 }
@@ -178,6 +184,18 @@ func (r Recorder) writeRecord(dir, sha, tree string, results map[string]record.T
 		}
 	}
 	return nil
+}
+
+// lostRace reports whether a failed push was rejected because the records
+// branch moved on the remote meanwhile (another recorder pushed first).
+func lostRace(err error) bool {
+	msg := err.Error()
+	for _, s := range []string{"(fetch first)", "(non-fast-forward)", "(stale info)", "cannot lock ref", "incorrect old value"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeArtifacts(dir, sha string, results map[string]record.TaskResult, artifacts Artifacts) error {
