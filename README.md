@@ -82,7 +82,7 @@ Runs tasks at the repository root and records the result for `HEAD`.
 - Tasks run sequentially in the listed order. All of them run even if one fails, unless `--fail-fast` is given.
 - Both successes and failures are recorded.
 - Files listed in a task's [`artifacts`](docs/configuration.md#artifacts) are stored with the record; read them back with `uki artifact get`.
-- A task with [`inputs`](docs/configuration.md#inputs-and-reuse) is not run when a passing result for the same inputs is already recorded (for any commit); the result is recorded for `HEAD` as reused.
+- A task with [`inputs`](docs/configuration.md#inputs-and-reuse) is not run when a passing result for the same inputs is already recorded (for any commit); the result is recorded for `HEAD` as reused. A change to a file that no task's `inputs` and no `irrelevant` pattern covers re-runs every task.
 
 The result is **not** recorded (a warning is printed and the tasks still run) when:
 

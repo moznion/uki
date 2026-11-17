@@ -135,8 +135,10 @@ func TestMarkRejectsReuseThatDefaultBranchRulesForbid(t *testing.T) {
 	e := newReuseEnv(t)
 	expect(t, e.uki(e.dev, "run"), 0)
 	testutil.Git(t, e.dev, "checkout", "--quiet", "-b", "feature/x")
-	// The branch narrows a's inputs and gives "always" some, then runs once.
+	// The branch narrows a's inputs, declares a/** irrelevant (otherwise the
+	// now-unclassified a/x would still count) and gives "always" inputs.
 	loose := strings.Replace(reuseConfig, `inputs: ["a/**"]`, `inputs: ["nothing/**"]`, 1)
+	loose = strings.Replace(loose, "inputs: [shared.txt]", "inputs: [shared.txt]\nirrelevant: [\"a/**\"]", 1)
 	loose = strings.Replace(loose, `always: { run: "echo RUN-ALWAYS" }`, `always: { run: "echo RUN-ALWAYS", inputs: ["nothing/**"] }`, 1)
 	e.change(config.FileName, loose)
 	expect(t, e.uki(e.dev, "run"), 0, "RUN-A", "RUN-ALWAYS")
@@ -155,6 +157,7 @@ func TestMarkRejectsReuseThatDefaultBranchRulesForbid(t *testing.T) {
 
 func TestArtifactGetFollowsReusedResult(t *testing.T) {
 	e := newEnv(t, `
+irrelevant: [README]
 tasks:
   cover:
     run: "mkdir -p out && git rev-parse HEAD > out/c"
@@ -169,5 +172,22 @@ branches: [ { match: "**", tasks: [cover] } ]
 	r := e.uki(e.dev, "artifact", "get", "cover", "out/c")
 	if r.code != 0 || strings.TrimSpace(r.stdout) != first {
 		t.Errorf("artifact of reused result = %q (exit %d) %s", r.stdout, r.code, r.stderr)
+	}
+}
+
+func TestRunRerunsEverythingWhenAnUnclassifiedFileChanges(t *testing.T) {
+	e := newEnv(t, reuseConfig+"irrelevant: [\"docs/**\"]\n", "a/x", "good", "b/x", "1", "shared.txt", "1")
+	expect(t, e.uki(e.dev, "run"), 0)
+
+	e.change("docs/guide.md", "x")
+	r := e.uki(e.dev, "run")
+	if ran(r, "A") || ran(r, "B") {
+		t.Errorf("an irrelevant change re-ran tasks:\n%s", r.stdout)
+	}
+
+	e.change("Makefile", "new file nobody classified")
+	r = e.uki(e.dev, "run")
+	if !ran(r, "A") || !ran(r, "B") {
+		t.Errorf("an unclassified change did not re-run every task with inputs:\n%s", r.stdout)
 	}
 }

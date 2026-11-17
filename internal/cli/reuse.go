@@ -20,6 +20,7 @@ type reuser struct {
 	sha        string
 	cfgHash    string
 	tree       *inputs.Tree
+	rules      *inputs.Rules
 	recordsRef string // "" disables lookups (nothing to reuse from)
 }
 
@@ -34,7 +35,7 @@ func newReuser(g gitx.Git, cfg *config.Config, sha string, lookup bool) (*reuser
 	if err != nil {
 		return nil, err
 	}
-	r := &reuser{g: g, cfg: cfg, sha: sha, cfgHash: sha256Hex(cfgBytes), tree: tree}
+	r := &reuser{g: g, cfg: cfg, sha: sha, cfgHash: sha256Hex(cfgBytes), tree: tree, rules: inputs.NewRules(cfg)}
 	if lookup {
 		if r.recordsRef, err = recordsRef(g, cfg, false); err != nil {
 			return nil, err
@@ -45,11 +46,8 @@ func newReuser(g gitx.Git, cfg *config.Config, sha string, lookup bool) (*reuser
 
 // key is the inputs key of task at HEAD, or "" when it declares no inputs.
 func (r *reuser) key(task string) string {
-	patterns := r.cfg.TaskInputs(task)
-	if patterns == nil {
-		return ""
-	}
-	return r.tree.Key(r.cfgHash, task, patterns)
+	key, _ := r.tree.Key(r.cfgHash, task, r.rules)
+	return key
 }
 
 // find returns the result to record for task when a passing, actually-run
@@ -98,10 +96,10 @@ func (r *reuser) find(task, branch string) (record.TaskResult, bool, error) {
 // the commit the result came from, whose record must show a real, passing
 // run.
 func (m marker) checkReuse(sha, cfgHash, task string, res record.TaskResult, trees map[string]*inputs.Tree) error {
-	patterns := m.cfg.TaskInputs(task)
-	if patterns == nil {
+	if m.cfg.TaskInputs(task) == nil {
 		return errors.New("the task declares no inputs, so its result cannot be reused")
 	}
+	rules := inputs.NewRules(m.cfg)
 	origin := res.ReusedFrom
 	if !record.ValidSHA(origin) {
 		return fmt.Errorf("invalid reused_from %q", origin)
@@ -151,7 +149,9 @@ func (m marker) checkReuse(sha, cfgHash, task string, res record.TaskResult, tre
 	if err != nil {
 		return err
 	}
-	if cur.Key(cfgHash, task, patterns) != prev.Key(sha256Hex(ocfg), task, patterns) {
+	curKey, _ := cur.Key(cfgHash, task, rules)
+	prevKey, _ := prev.Key(sha256Hex(ocfg), task, rules)
+	if curKey != prevKey {
 		return fmt.Errorf("inputs differ from %s", short(origin))
 	}
 	return nil

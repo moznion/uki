@@ -51,18 +51,49 @@ func ReadTree(g gitx.Git, rev string) (*Tree, error) {
 	return t, nil
 }
 
+// Rules decides which files belong to the inputs of each task.
+//
+// A file belongs to a task's inputs when the task's patterns match it, or
+// when it is unknown: matched by no task's inputs and not listed as
+// irrelevant. Unknown files count for every task, so a change nobody
+// classified re-runs everything instead of being silently skipped.
+type Rules struct {
+	cfg   *config.Config
+	known func(string) bool
+	tasks map[string]func(string) bool
+}
+
+// NewRules compiles the patterns of cfg once.
+func NewRules(cfg *config.Config) *Rules {
+	known := append([]string{}, cfg.Irrelevant...)
+	for name := range cfg.Tasks {
+		known = append(known, cfg.TaskInputs(name)...)
+	}
+	return &Rules{cfg: cfg, known: config.InputMatcher(known), tasks: map[string]func(string) bool{}}
+}
+
 // Key identifies the inputs of task: the hash of uki.yaml at the commit
 // (configSHA256, so any change to the config invalidates every key), the
-// task name, and the mode, object id and path of every file matching
-// patterns. Two commits get the same key exactly when all of these agree.
-func (t *Tree) Key(configSHA256, task string, patterns []string) string {
-	match := config.InputMatcher(patterns)
+// task name, and the mode, object id and path of every file in the task's
+// inputs (see Rules). Two commits get the same key exactly when all of these
+// agree. ok is false when the task declares no inputs (it always runs).
+func (t *Tree) Key(configSHA256, task string, r *Rules) (key string, ok bool) {
+	match, found := r.tasks[task]
+	if !found {
+		if patterns := r.cfg.TaskInputs(task); patterns != nil {
+			match = config.InputMatcher(patterns)
+		}
+		r.tasks[task] = match
+	}
+	if match == nil {
+		return "", false
+	}
 	h := sha256.New()
-	fmt.Fprintf(h, "uki-inputs v1\nconfig %s\ntask %s\n", configSHA256, task)
+	fmt.Fprintf(h, "uki-inputs v2\nconfig %s\ntask %s\n", configSHA256, task)
 	for _, e := range t.entries {
-		if match(e.path) {
+		if match(e.path) || !r.known(e.path) {
 			fmt.Fprintf(h, "%s %s %s\x00", e.mode, e.oid, e.path)
 		}
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil)), true
 }
