@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -21,6 +22,9 @@ const FileName = "uki.yaml"
 const DefaultMaxArtifactBytes = 10 << 20
 
 type Config struct {
+	// Inputs are file patterns added to the inputs of every task that
+	// declares its own (e.g. tool versions shared by all tasks).
+	Inputs   []string        `yaml:"inputs"`
 	Tasks    map[string]Task `yaml:"tasks"`
 	Branches []BranchRule    `yaml:"branches"`
 	Record   RecordConfig    `yaml:"record"`
@@ -34,6 +38,10 @@ type Task struct {
 	// coverage profile). They are stored on the records branch next to the
 	// record, so they must be ignored by git rather than tracked.
 	Artifacts []string `yaml:"artifacts"`
+	// Inputs are the file patterns the task's result depends on. When set,
+	// `uki run` reuses a passing result recorded for the same inputs instead
+	// of running the task again. Without it the task always runs.
+	Inputs []string `yaml:"inputs"`
 }
 
 // BranchRule maps a branch glob to the tasks required on matching branches.
@@ -100,7 +108,17 @@ func Parse(b []byte) (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	for _, p := range c.Inputs {
+		if !validInputPattern(p) {
+			return fmt.Errorf("inputs: pattern %q must be a clean repository-relative path or glob", p)
+		}
+	}
 	for name, t := range c.Tasks {
+		for _, p := range t.Inputs {
+			if !validInputPattern(p) {
+				return fmt.Errorf("task %q: input pattern %q must be a clean repository-relative path or glob", name, p)
+			}
+		}
 		if t.Run == "" {
 			return fmt.Errorf("task %q: run is empty", name)
 		}
@@ -132,6 +150,39 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// TaskInputs returns the effective input patterns of task: the top-level
+// inputs followed by the task's own, or nil when the task declares none
+// (its result is then never reused).
+func (c *Config) TaskInputs(task string) []string {
+	t, ok := c.Tasks[task]
+	if !ok || len(t.Inputs) == 0 {
+		return nil
+	}
+	return append(append([]string{}, c.Inputs...), t.Inputs...)
+}
+
+// InputMatcher returns a function reporting whether a repository-relative
+// path matches any of patterns (branch glob syntax: `*` and `?` do not cross
+// `/`, `**` does). The patterns are compiled once.
+func InputMatcher(patterns []string) func(string) bool {
+	res := make([]*regexp.Regexp, len(patterns))
+	for i, p := range patterns {
+		res[i] = globToRegexp(p)
+	}
+	return func(path string) bool {
+		for _, re := range res {
+			if re.MatchString(path) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func validInputPattern(p string) bool {
+	return ValidArtifactPath(p)
 }
 
 // TasksForBranch returns the tasks of the first rule matching branch.

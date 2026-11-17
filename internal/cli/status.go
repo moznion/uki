@@ -111,10 +111,13 @@ func printTasks(w io.Writer, rec *record.Record) {
 	for _, n := range names {
 		t := rec.Tasks[n]
 		result := "ok"
+		if t.ReusedFrom != "" {
+			result = "ok (reused " + short(t.ReusedFrom) + ")"
+		}
 		if !t.Success {
 			result = fmt.Sprintf("FAILED (exit %d)", t.ExitCode)
 		}
-		fmt.Fprintf(w, "  %-*s  %-16s %8s  %s  %s/%s\n", width, n, result,
+		fmt.Fprintf(w, "  %-*s  %-21s %8s  %s  %s/%s\n", width, n, result,
 			(time.Duration(t.DurationMS) * time.Millisecond).String(),
 			t.StartedAt.Local().Format(time.DateTime), t.OS, t.Arch)
 		paths := make([]string, 0, len(t.Artifacts))

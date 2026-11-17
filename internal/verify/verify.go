@@ -25,6 +25,9 @@ type Input struct {
 	NoMatchingRule bool
 	Record         *record.Record // nil when no record exists
 	SignatureErr   error          // non-nil when signature verification failed
+	// InvalidReuse names tasks whose reused result did not verify (inputs
+	// differ from the commit it came from, no real passing run there, ...).
+	InvalidReuse map[string]bool
 }
 
 type Verdict struct {
@@ -49,7 +52,7 @@ func Evaluate(in Input) Verdict {
 		return Verdict{StateSuccess, "The branch rule requires no tasks"}
 	}
 
-	var failed, missing, stale []string
+	var failed, missing, stale, invalid []string
 	for _, name := range in.Required {
 		res, ok := in.Record.Tasks[name]
 		switch {
@@ -59,6 +62,8 @@ func Evaluate(in Input) Verdict {
 			stale = append(stale, name)
 		case !res.Success:
 			failed = append(failed, name)
+		case in.InvalidReuse[name]:
+			invalid = append(invalid, name)
 		}
 	}
 	switch {
@@ -66,6 +71,8 @@ func Evaluate(in Input) Verdict {
 		return Verdict{StateFailure, describe("Failed", failed)}
 	case len(stale) > 0:
 		return Verdict{StateError, describe("Ran with a different uki.yaml", stale)}
+	case len(invalid) > 0:
+		return Verdict{StateError, describe("Reused result not valid", invalid)}
 	case len(missing) > 0:
 		return Verdict{StatePending, describe("Not run yet", missing)}
 	}

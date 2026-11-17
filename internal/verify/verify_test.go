@@ -27,6 +27,14 @@ func TestEvaluate(t *testing.T) {
 		{"failure wins over missing", func(in *Input) { in.Record = rec(map[string]record.TaskResult{"test": ng}) }, StateFailure},
 		{"missing", func(in *Input) { in.Record = rec(map[string]record.TaskResult{"lint": ok}) }, StatePending},
 		{"stale config", func(in *Input) { in.Record = rec(map[string]record.TaskResult{"lint": ok, "test": stale}) }, StateError},
+		{"invalid reuse", func(in *Input) {
+			in.Record = rec(map[string]record.TaskResult{"lint": ok, "test": ok})
+			in.InvalidReuse = map[string]bool{"test": true}
+		}, StateError},
+		{"failure wins over invalid reuse", func(in *Input) {
+			in.Record = rec(map[string]record.TaskResult{"lint": ng, "test": ok})
+			in.InvalidReuse = map[string]bool{"test": true}
+		}, StateFailure},
 		{"tree mismatch", func(in *Input) {
 			in.Record = rec(map[string]record.TaskResult{"lint": ok, "test": ok})
 			in.Record.Tree = "other"

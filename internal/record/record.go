@@ -33,6 +33,31 @@ type TaskResult struct {
 	// Artifacts maps each stored artifact (its repository-relative path) to
 	// its digest. The content lives at ArtifactPath on the records branch.
 	Artifacts map[string]Artifact `json:"artifacts,omitempty"`
+	// InputsSHA256 is the inputs key of the task at this commit (see package
+	// inputs); empty when the task declares no inputs.
+	InputsSHA256 string `json:"inputs_sha256,omitempty"`
+	// ReusedFrom is set when the task was not run for this commit: the result
+	// (command, outcome, log digest, artifacts, ...) is the one recorded for
+	// the commit named here, which had the same inputs. It always names the
+	// commit the task actually ran on, never another reuse.
+	ReusedFrom string `json:"reused_from,omitempty"`
+}
+
+// IndexEntry is stored at IndexPath(key): the latest commit whose passing,
+// actually-run result of Task had that inputs key.
+type IndexEntry struct {
+	SHA  string `json:"sha"`
+	Task string `json:"task"`
+}
+
+// IndexPath shards the inputs index like records. key must satisfy ValidKey.
+func IndexPath(key string) string {
+	return fmt.Sprintf("inputs/%s/%s.json", key[:2], key)
+}
+
+// ValidKey reports whether s is a lowercase hex SHA-256 digest.
+func ValidKey(s string) bool {
+	return len(s) == 64 && ValidSHA(s)
 }
 
 // Artifact describes one file a task produced, as stored on the records branch.

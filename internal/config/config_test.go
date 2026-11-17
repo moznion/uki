@@ -130,3 +130,43 @@ tasks:
 		t.Errorf("task name without artifacts: %v", err)
 	}
 }
+
+func TestParseInputs(t *testing.T) {
+	c, err := Parse([]byte(`
+inputs: [go.mod]
+tasks:
+  test: { run: x, inputs: ["src/**"] }
+  vuln: { run: y }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.TaskInputs("test"); !reflect.DeepEqual(got, []string{"go.mod", "src/**"}) {
+		t.Errorf("TaskInputs(test) = %v", got)
+	}
+	if got := c.TaskInputs("vuln"); got != nil {
+		t.Errorf("a task without inputs must not get the top-level ones: %v", got)
+	}
+	for _, cfg := range []string{
+		`inputs: [../x]`,
+		`inputs: [/abs]`,
+		`tasks: { t: { run: x, inputs: ["./src/**"] } }`,
+		`tasks: { t: { run: x, inputs: [""] } }`,
+	} {
+		if _, err := Parse([]byte(cfg)); err == nil {
+			t.Errorf("%s: expected an error", cfg)
+		}
+	}
+}
+
+func TestInputMatcher(t *testing.T) {
+	m := InputMatcher([]string{"src/**", "go.mod", "cmd/*.go"})
+	for p, want := range map[string]bool{
+		"src/a/b.go": true, "go.mod": true, "cmd/main.go": true,
+		"cmd/sub/main.go": false, "go.sum": false, "srcx/a": false,
+	} {
+		if m(p) != want {
+			t.Errorf("match(%q) = %v, want %v", p, !want, want)
+		}
+	}
+}

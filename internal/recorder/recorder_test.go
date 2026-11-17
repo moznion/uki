@@ -242,3 +242,30 @@ func TestSaveRejectsUnlistedArtifacts(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestSaveIndexesOnlyPassingRealRuns(t *testing.T) {
+	_, dir, sha, tree := setup(t)
+	k := func(c byte) string { return strings.Repeat(string(c), 64) }
+	results := map[string]record.TaskResult{
+		"pass":    {Success: true, InputsSHA256: k('a')},
+		"fail":    {Success: false, InputsSHA256: k('b')},
+		"reused":  {Success: true, InputsSHA256: k('c'), ReusedFrom: strings.Repeat("d", 40)},
+		"noinput": {Success: true},
+	}
+	if err := newRecorder(dir).Save(sha, tree, results, nil); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, dir, "fetch", "--quiet", "origin", "+refs/heads/uki/records:refs/remotes/origin/uki/records")
+	got := testutil.Git(t, dir, "ls-tree", "-r", "--name-only", "origin/uki/records", "inputs/")
+	if want := record.IndexPath(k('a')); got != want {
+		t.Errorf("index = %q, want %q", got, want)
+	}
+	entry := testutil.Git(t, dir, "show", "origin/uki/records:"+record.IndexPath(k('a')))
+	if entry != fmt.Sprintf(`{"sha":"%s","task":"pass"}`, sha) {
+		t.Errorf("index entry = %s", entry)
+	}
+	msg := testutil.Git(t, dir, "log", "-1", "--format=%B", "origin/uki/records")
+	if !strings.Contains(msg, "Uki-Task: reused success=true") || !strings.Contains(msg, "reused="+strings.Repeat("d", 40)) {
+		t.Errorf("commit message lacks the reuse trailer:\n%s", msg)
+	}
+}
