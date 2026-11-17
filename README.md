@@ -79,7 +79,7 @@ Runs tasks at the repository root and records the result for `HEAD`.
 
 - Without task names, runs the tasks of the first [branch rule](docs/configuration.md#branches) that matches the current branch.
 - With task names, runs only those tasks ("task runner mode"). Their results are merged into the existing record for the commit, so tasks can be run one at a time.
-- Tasks run sequentially in the listed order. All of them run even if one fails, unless `--fail-fast` is given.
+- Tasks run one at a time in the listed order, or several at once with `-j N` (or `jobs` in `uki.yaml`; see [Running tasks in parallel](docs/configuration.md#running-tasks-in-parallel)). All of them run even if one fails, unless `--fail-fast` is given.
 - Both successes and failures are recorded.
 - Files listed in a task's [`artifacts`](docs/configuration.md#artifacts) are stored with the record; read them back with `uki artifact get`.
 - A task with [`inputs`](docs/configuration.md#inputs-and-reuse) is not run when a passing result for the same inputs is already recorded (for any commit); the result is recorded for `HEAD` as reused. A change to a file that no task's `inputs` and no `irrelevant` pattern covers re-runs every task.
@@ -94,9 +94,10 @@ The result is **not** recorded (a warning is printed and the tasks still run) wh
 | Flag | Description |
 |---|---|
 | `--branch <name>` | Branch name used for rule matching. Defaults to the current branch; required on a detached `HEAD` unless task names are given. |
-| `--fail-fast` | Stop at the first failing task. |
+| `--fail-fast` | Stop at the first failing task. In parallel, tasks still running are stopped and not recorded. |
 | `--no-record` | Run without recording. Results are never reused in this mode. |
 | `--no-reuse` | Run every task, even when a passing result for the same inputs is recorded. |
+| `-j`, `--jobs <n>` | Run up to `n` tasks at the same time. Overrides `jobs` in `uki.yaml`; the default is 1. |
 
 Exit code: `0` if every task passed, `1` if any task failed or uki itself failed, `2` for usage errors, `130` when interrupted.
 
@@ -173,7 +174,7 @@ $ uki config get record.branch
 uki/records
 ```
 
-Keys: `record.branch`, `record.remote`, `record.sign`, `record.allowed_signers`, `record.max_artifact_bytes`, `status.context`. Unset values print an empty line. Exit code: `0` on success, `1` for an unknown key or an unreadable `uki.yaml`, `2` for usage errors.
+Keys: `jobs`, `record.branch`, `record.remote`, `record.sign`, `record.allowed_signers`, `record.max_artifact_bytes`, `status.context`. Unset values print an empty line. Exit code: `0` on success, `1` for an unknown key or an unreadable `uki.yaml`, `2` for usage errors.
 
 ### `uki version`
 

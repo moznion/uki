@@ -5,6 +5,7 @@ uki is configured by `uki.yaml` at the repository root. `uki init` writes a star
 ```yaml
 inputs: [<glob>, ...]      # added to the inputs of every task that declares its own
 irrelevant: [<glob>, ...]  # files known to affect no task
+jobs: <n>                  # tasks run at the same time (default 1)
 
 tasks:            # what can be run
   <name>:
@@ -12,6 +13,7 @@ tasks:            # what can be run
     env:
       <KEY>: <value>
     inputs: [<glob>, ...]     # files the result depends on (enables reuse)
+    locks: [<name>, ...]      # never run at the same time as tasks sharing a name
     artifacts: [<path>, ...]  # files stored with the record
 
 branches:         # which tasks each branch requires (first match wins)
@@ -52,6 +54,7 @@ A map from task name to task definition. Task names are free-form strings and ar
 | `run` | string | yes | Command executed with `sh -c`, from the repository root. |
 | `env` | map of string to string | no | Extra environment variables. They are added on top of the environment `uki` was started with. |
 | `artifacts` | list of strings | no | Files the task produces that are stored with the record (see [Artifacts](#artifacts)). |
+| `locks` | list of strings | no | Names of resources the task needs to itself. Tasks that share a lock never run at the same time (see [Running tasks in parallel](#running-tasks-in-parallel)). |
 | `inputs` | list of globs | no | Files the task's result depends on. A passing result recorded for the same inputs is reused instead of running the task again (see [Inputs and reuse](#inputs-and-reuse)). Without it the task always runs. |
 
 A task passes when its command exits with status `0`.
@@ -98,6 +101,31 @@ tasks:
 - Nothing is stored with `--no-record`, or when the run is not recorded for any other reason.
 
 Artifacts are published to everyone who can read the repository, and they stay in the history of the records branch. Do not list files that may contain secrets.
+
+### Running tasks in parallel
+
+By default `uki run` runs one task at a time. With `jobs: <n>` at the top level, or `uki run -j <n>`, it runs up to `n` tasks at once: tasks start in the listed order as slots free up, and the record is the same as for a sequential run.
+
+```yaml
+jobs: 4
+tasks:
+  lint:
+    run: golangci-lint run ./...
+    locks: [golangci-lint]   # the tool refuses to run twice at once
+  generate-check:
+    run: make generate && git diff --exit-code
+    locks: [worktree]        # rewrites files the others read
+  test:
+    run: go test ./...
+    locks: [worktree]
+```
+
+- Tasks that share a lock never run at the same time; a task waits while another holding any of its locks runs, and later tasks without that lock may start first. Lock names are free-form.
+- Give a lock to every task that writes files another task reads, even temporarily (code generators, checks that regenerate and compare), and to tools that refuse concurrent runs. Without one, a task may read half-written files and pass or fail for the wrong reason.
+- Each task's output is buffered and printed in one piece when the task ends, so outputs never interleave; a `==> [<task>] started` line shows what is running. Within a task, stdout and stderr are each kept in order but printed separately.
+- A task running in parallel cannot read from or prompt on the terminal: it runs in its own process group with no input. That process group is also what lets uki stop everything the task started.
+- With `--fail-fast`, the first failure stops the tasks still running (SIGTERM to their process groups, then the shell is killed after 10 seconds), starts no new ones, and records only the tasks that finished.
+- Tasks still compete for CPU, memory and services such as Docker. Tests that depend on timing may need a lock too, or a lower `jobs`.
 
 ### Inputs and reuse
 

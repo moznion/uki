@@ -537,6 +537,7 @@ func TestConfigGet(t *testing.T) {
 		"record.sign":            "true",
 		"record.allowed_signers": "",
 		"status.context":         "uki",
+		"jobs":                   "1", // default applied
 	} {
 		r := e.uki(e.dev, "config", "get", key)
 		if r.code != 0 || r.stdout != want+"\n" {
@@ -546,7 +547,7 @@ func TestConfigGet(t *testing.T) {
 	expect(t, e.uki(e.dev, "config", "get", "nope"), 1, `unknown config key "nope"`, "record.branch")
 	expect(t, e.uki(e.dev, "config"), 2, "Usage: uki config get <key>")
 	expect(t, e.uki(e.dev, "config", "set", "record.branch"), 2, "Usage: uki config get <key>")
-	expect(t, e.uki(e.dev, "config", "-h"), 0, "Keys: record.allowed_signers, record.branch")
+	expect(t, e.uki(e.dev, "config", "-h"), 0, "Keys: jobs, record.allowed_signers, record.branch")
 }
 
 // ---- helpers under test ----

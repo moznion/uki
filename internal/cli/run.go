@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,8 +23,14 @@ func (a *app) runCmd(args []string) (int, error) {
 	failFast := fs.Bool("fail-fast", false, "stop at the first failing task")
 	branchFlag := fs.String("branch", "", "branch name used for rule matching (default: current branch)")
 	noReuse := fs.Bool("no-reuse", false, "run every task even when a passing result for the same inputs is recorded")
+	jobsFlag := fs.Int("jobs", 0, "run up to this many tasks at the same time (default: jobs in uki.yaml, or 1)")
+	fs.IntVar(jobsFlag, "j", 0, "shorthand for -jobs")
 	if err := a.parse(fs, args); err != nil {
 		return 2, err
+	}
+	if *jobsFlag < 0 {
+		fmt.Fprintln(a.stderr, "uki: -jobs must not be negative")
+		return 2, errUsage
 	}
 
 	top, err := gitx.Git{}.TopLevel()
@@ -57,6 +64,11 @@ func (a *app) runCmd(args []string) (int, error) {
 		if _, ok := cfg.Tasks[t]; !ok {
 			return 1, fmt.Errorf("unknown task %q", t)
 		}
+	}
+	tasks = dedupe(tasks)
+	jobs := cfg.Jobs
+	if *jobsFlag > 0 {
+		jobs = *jobsFlag
 	}
 	if err := checkArtifactsUntracked(g, cfg, tasks); err != nil {
 		return 1, err
@@ -98,8 +110,7 @@ func (a *app) runCmd(args []string) (int, error) {
 		defer stage.cleanup()
 	}
 
-	var results []runner.Result
-	failed := false
+	var toRun []string
 	for _, name := range tasks {
 		if ru != nil {
 			r, ok, err := ru.find(name, branch)
@@ -112,21 +123,18 @@ func (a *app) runCmd(args []string) (int, error) {
 				continue
 			}
 		}
-		delete(reused, name)
-		res := runner.Run(ctx, top, name, cfg.Tasks[name], a.stdout, a.stderr)
-		results = append(results, res)
-		// Collect right away: a later task may overwrite or remove the files.
-		if stage != nil && ctx.Err() == nil {
-			if err := stage.collect(name, cfg.Tasks[name].Artifacts, a.warn); err != nil {
-				return 1, err
-			}
-		}
-		if !res.Success {
-			failed = true
-			if *failFast || ctx.Err() != nil {
-				break
-			}
-		}
+		toRun = append(toRun, name)
+	}
+
+	var results []runner.Result
+	var failed bool
+	if jobs <= 1 {
+		results, failed, err = a.runSequential(ctx, top, cfg, toRun, *failFast, stage)
+	} else {
+		results, failed, err = a.runParallel(ctx, top, cfg, toRun, jobs, *failFast, stage)
+	}
+	if err != nil {
+		return 1, err
 	}
 	code := 0
 	if failed {
@@ -199,4 +207,141 @@ func (a *app) save(g gitx.Git, cfg *config.Config, sha, branch string, results [
 		SeedFiles: []string{WorkflowPath, ActionsLockPath},
 		Log:       a.stderr,
 	}.Save(sha, tree, m, stage.files)
+}
+
+// dedupe drops repeated task names, keeping the first: a task's result is
+// recorded once per commit, so running it twice in one run is pointless.
+func dedupe(names []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// runSequential runs tasks one after another, streaming their output.
+func (a *app) runSequential(ctx context.Context, top string, cfg *config.Config, tasks []string, failFast bool, stage *artifactStage) ([]runner.Result, bool, error) {
+	var results []runner.Result
+	failed := false
+	for _, name := range tasks {
+		res := runner.Run(ctx, top, name, cfg.Tasks[name], a.stdout, a.stderr)
+		results = append(results, res)
+		// Collect right away: a later task may overwrite or remove the files.
+		if stage != nil && ctx.Err() == nil {
+			if err := stage.collect(name, cfg.Tasks[name].Artifacts, a.warn); err != nil {
+				return nil, false, err
+			}
+		}
+		if !res.Success {
+			failed = true
+			if failFast || ctx.Err() != nil {
+				break
+			}
+		}
+	}
+	return results, failed, nil
+}
+
+type finished struct {
+	name           string
+	res            runner.Result
+	stdout, stderr *bytes.Buffer
+	cancelledByUs  bool
+}
+
+// runParallel runs up to jobs tasks at the same time. Tasks start in the
+// listed order as slots free up, except that a task waits while another
+// task holding one of its locks runs. Each task's output is buffered and
+// printed in one piece when it ends, so outputs never interleave.
+//
+// With failFast, the first failure stops the tasks still running; their
+// results are dropped, as if they had not been started.
+func (a *app) runParallel(ctx context.Context, top string, cfg *config.Config, tasks []string, jobs int, failFast bool, stage *artifactStage) ([]runner.Result, bool, error) {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	pending := append([]string(nil), tasks...)
+	held := map[string]bool{}
+	running := 0
+	stopping := false
+	done := make(chan finished)
+
+	free := func(name string) bool {
+		for _, l := range cfg.Tasks[name].Locks {
+			if held[l] {
+				return false
+			}
+		}
+		return true
+	}
+	start := func(name string) {
+		for _, l := range cfg.Tasks[name].Locks {
+			held[l] = true
+		}
+		running++
+		fmt.Fprintf(a.stderr, "==> [%s] started\n", name)
+		go func() {
+			var out, errOut bytes.Buffer
+			res := runner.RunWith(runCtx, top, name, cfg.Tasks[name], &out, &errOut, runner.Options{Detach: true})
+			done <- finished{name: name, res: res, stdout: &out, stderr: &errOut, cancelledByUs: runCtx.Err() != nil && ctx.Err() == nil}
+		}()
+	}
+
+	var results []runner.Result
+	failed := false
+	var collectErr error
+	for {
+		if !stopping {
+			rest := pending[:0]
+			for _, name := range pending {
+				if running < jobs && free(name) {
+					start(name)
+				} else {
+					rest = append(rest, name)
+				}
+			}
+			pending = rest
+		}
+		if running == 0 {
+			break
+		}
+
+		f := <-done
+		running--
+		for _, l := range cfg.Tasks[f.name].Locks {
+			held[l] = false
+		}
+		_, _ = a.stdout.Write(f.stdout.Bytes())
+		_, _ = a.stderr.Write(f.stderr.Bytes())
+		if f.cancelledByUs && !f.res.Success {
+			fmt.Fprintf(a.stderr, "==> [%s] stopped after another task failed (not recorded)\n", f.name)
+			continue
+		}
+		results = append(results, f.res)
+		if stage != nil && ctx.Err() == nil && collectErr == nil {
+			collectErr = stage.collect(f.name, cfg.Tasks[f.name].Artifacts, a.warn)
+		}
+		if collectErr != nil && !stopping {
+			stopping = true
+			cancel()
+		}
+		if !f.res.Success {
+			failed = true
+			if failFast && !stopping {
+				stopping = true
+				cancel()
+			}
+		}
+		if ctx.Err() != nil {
+			stopping = true
+		}
+	}
+	if collectErr != nil {
+		return nil, false, collectErr
+	}
+	return results, failed, nil
 }

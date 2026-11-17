@@ -28,8 +28,23 @@ type Result struct {
 	LogSHA256 string
 }
 
+// Options tune how a task is run.
+type Options struct {
+	// Detach runs the task in its own process group. Cancelling ctx then
+	// signals the whole group (the shell and everything it started), so a
+	// task stopped while others keep running leaves nothing behind. It is
+	// meant for tasks run in parallel, whose output is not a terminal; a
+	// detached task cannot read from or prompt on the terminal.
+	Detach bool
+}
+
 // Run executes the task via `sh -c` in dir, streaming its output to stdout/stderr.
 func Run(ctx context.Context, dir, name string, t config.Task, stdout, stderr io.Writer) Result {
+	return RunWith(ctx, dir, name, t, stdout, stderr, Options{})
+}
+
+// RunWith is Run with options.
+func RunWith(ctx context.Context, dir, name string, t config.Task, stdout, stderr io.Writer, opts Options) Result {
 	fmt.Fprintf(stderr, "==> [%s] %s\n", name, t.Run)
 
 	// exec copies stdout and stderr on separate goroutines, so the shared
@@ -42,6 +57,9 @@ func Run(ctx context.Context, dir, name string, t config.Task, stdout, stderr io
 	cmd.Stdout = io.MultiWriter(stdout, h)
 	cmd.Stderr = io.MultiWriter(stderr, h)
 	cmd.Env = os.Environ()
+	if opts.Detach {
+		detach(cmd)
+	}
 	keys := make([]string, 0, len(t.Env))
 	for k := range t.Env {
 		keys = append(keys, k)
