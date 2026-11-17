@@ -20,4 +20,8 @@ jobs:
 
       - uses: Songmu/tagpr@v1.22.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pull requests created with the default GITHUB_TOKEN do not trigger
+          # other workflows, so ci.yml would not run on tagpr's pull requests.
+          # Set TAGPR_TOKEN (a PAT or GitHub App token with contents and
+          # pull-requests write) to enable that.
+          GITHUB_TOKEN: ${{ secrets.TAGPR_TOKEN || secrets.GITHUB_TOKEN }}

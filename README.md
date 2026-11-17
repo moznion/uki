@@ -289,7 +289,9 @@ The tasks are `golangci-lint run`, `go test -race ./...`, and `gh actions-lock -
 
 ### Before opening a pull request
 
-**Always run `uki run` on the final commit before opening (or updating) a pull request.** The `uki` commit status, and therefore the merge check, comes only from these records; CI does not run the tasks itself.
+**Always run `uki run` on the final commit before opening (or updating) a pull request.** The `uki` commit status, and therefore the merge check, comes only from these records.
+
+Separately from uki, [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs tests and lint on GitHub Actions for pushes to `main`, pull requests opened by tagpr, and pull requests that change `.github/workflows/`. For tagpr's pull requests to trigger it, set the `TAGPR_TOKEN` secret (PAT or GitHub App token); pull requests created with the default `GITHUB_TOKEN` do not trigger workflows.
 
 1. Commit everything. The working tree must be clean, or the result is not recorded.
 2. Run `go run ./cmd/uki run` and make sure every task passes. The record is pushed to `uki/records` automatically.
