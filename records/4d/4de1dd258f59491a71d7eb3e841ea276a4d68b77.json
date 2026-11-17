@@ -1,0 +1,45 @@
+{
+  "sha": "4de1dd258f59491a71d7eb3e841ea276a4d68b77",
+  "tree": "a02bfc91e14989f83a3832e4b1fbc7c096f2add3",
+  "tasks": {
+    "actions-lock": {
+      "command": "gh actions-lock --verify-local",
+      "success": true,
+      "exit_code": 0,
+      "branch": "ci/uki-skip-main",
+      "config_sha256": "ad99fd9f54250149f765fe83248f8227bd38015df0da185b58dc0a4ee6c29099",
+      "started_at": "2026-11-17T06:40:10.60353Z",
+      "duration_ms": 143,
+      "log_sha256": "b4fe46cbe7670f6116e032a619b684cd1130fc5641d54be351e258cf602e7bc6",
+      "os": "darwin",
+      "arch": "arm64",
+      "uki_version": "dev"
+    },
+    "lint": {
+      "command": "golangci-lint run ./...",
+      "success": true,
+      "exit_code": 0,
+      "branch": "ci/uki-skip-main",
+      "config_sha256": "ad99fd9f54250149f765fe83248f8227bd38015df0da185b58dc0a4ee6c29099",
+      "started_at": "2026-11-17T06:39:32.747012Z",
+      "duration_ms": 1446,
+      "log_sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "os": "darwin",
+      "arch": "arm64",
+      "uki_version": "dev"
+    },
+    "test": {
+      "command": "go test -race -count=1 ./...",
+      "success": true,
+      "exit_code": 0,
+      "branch": "ci/uki-skip-main",
+      "config_sha256": "ad99fd9f54250149f765fe83248f8227bd38015df0da185b58dc0a4ee6c29099",
+      "started_at": "2026-11-17T06:39:34.193923Z",
+      "duration_ms": 36410,
+      "log_sha256": "a954d3d6fceaca2c3ccec2bd3080bac16bc8ce153b424e89cf98c29a72c18516",
+      "os": "darwin",
+      "arch": "arm64",
+      "uki_version": "dev"
+    }
+  }
+}
