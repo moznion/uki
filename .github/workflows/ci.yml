@@ -8,6 +8,10 @@
 # Other pull requests rely on the `uki` commit status instead; for them the
 # jobs below are skipped (a skipped job satisfies a required check).
 #
+# tagpr's pull requests get no uki record (uki.yml skips `tagpr-from-v*`), so
+# the `uki-status` job sets the required `uki` commit status itself once test
+# and lint pass. Otherwise the required check would wait forever.
+#
 # NOTE: pull requests created with the default GITHUB_TOKEN do not trigger
 # workflows, so tagpr must run with TAGPR_TOKEN (see tagpr.yml) for this to fire
 # on its pull requests.
@@ -74,3 +78,20 @@ jobs:
       - uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.15.0
+
+  # Satisfies the required `uki` status on tagpr's pull requests, which are
+  # verified by the jobs above instead of a uki record.
+  uki-status:
+    needs: [test, lint]
+    if: startsWith(github.head_ref, 'tagpr-from-')
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state=success -f context=uki \
+            -f description="verified by ci (tagpr pull request)"
