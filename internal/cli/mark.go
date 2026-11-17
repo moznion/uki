@@ -29,8 +29,12 @@ func (a *app) markCmd(args []string) error {
 	after := fs.String("records-after", "", "records branch commit after the push (records push)")
 	fromEvent := fs.Bool("github-event", false, "take the target from the GitHub Actions push event (GITHUB_REF, GITHUB_SHA, GITHUB_EVENT_PATH)")
 	dryRun := fs.Bool("dry-run", false, "print verdicts without calling the GitHub API")
+	output := fs.String("output", "text", `verdict format on stdout: "text", or "json" (an array of {sha, branch, state, description}, printed once at the end)`)
 	if err := a.parse(fs, args); err != nil {
 		return err
+	}
+	if *output != "text" && *output != "json" {
+		return fmt.Errorf("--output must be text or json, got %q", *output)
 	}
 	if *fromEvent && (*sha != "" || *branch != "" || *before != "" || *after != "") {
 		return errors.New("--github-event cannot be combined with --sha, --branch or --records-*")
@@ -68,6 +72,15 @@ func (a *app) markCmd(args []string) error {
 	}
 
 	m := marker{g: g, cfg: cfg, dryRun: *dryRun, out: a.stdout, errOut: a.stderr}
+	if *output == "json" {
+		verdicts := []markedCommit{}
+		m.verdicts = &verdicts
+		m.out = io.Discard
+		defer func() {
+			b, _ := json.Marshal(verdicts)
+			fmt.Fprintln(a.stdout, string(b))
+		}()
+	}
 	if cfg.Record.AllowedSigners != "" {
 		m.signersFile = filepath.Join(top, cfg.Record.AllowedSigners)
 		if _, err := os.Stat(m.signersFile); err != nil {
@@ -148,6 +161,16 @@ type marker struct {
 	dryRun      bool
 	out         io.Writer
 	errOut      io.Writer
+	// verdicts, when set, collects every judged commit for --output json.
+	verdicts *[]markedCommit
+}
+
+// markedCommit is one element of `uki mark --output json`.
+type markedCommit struct {
+	SHA         string `json:"sha"`
+	Branch      string `json:"branch"`
+	State       string `json:"state"`
+	Description string `json:"description"`
 }
 
 func (m marker) mark(ctx context.Context, sha, branch string) error {
@@ -162,6 +185,9 @@ func (m marker) mark(ctx context.Context, sha, branch string) error {
 		return err
 	}
 	fmt.Fprintf(m.out, "%s %s %-7s %s\n", short(sha), branch, v.State, v.Description)
+	if m.verdicts != nil {
+		*m.verdicts = append(*m.verdicts, markedCommit{SHA: sha, Branch: branch, State: v.State, Description: v.Description})
+	}
 	if m.dryRun {
 		return nil
 	}

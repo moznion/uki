@@ -14,11 +14,12 @@ import (
 
 // configKeys are the settings `uki config get` can print, with defaults applied.
 var configKeys = map[string]func(*config.Config) string{
-	"record.branch":          func(c *config.Config) string { return c.Record.Branch },
-	"record.remote":          func(c *config.Config) string { return c.Record.Remote },
-	"record.sign":            func(c *config.Config) string { return strconv.FormatBool(c.Record.Sign) },
-	"record.allowed_signers": func(c *config.Config) string { return c.Record.AllowedSigners },
-	"status.context":         func(c *config.Config) string { return c.Status.Context },
+	"record.branch":             func(c *config.Config) string { return c.Record.Branch },
+	"record.remote":             func(c *config.Config) string { return c.Record.Remote },
+	"record.sign":               func(c *config.Config) string { return strconv.FormatBool(c.Record.Sign) },
+	"record.allowed_signers":    func(c *config.Config) string { return c.Record.AllowedSigners },
+	"record.max_artifact_bytes": func(c *config.Config) string { return strconv.FormatInt(c.Record.MaxArtifactBytes, 10) },
+	"status.context":            func(c *config.Config) string { return c.Status.Context },
 }
 
 func configKeyNames() string {

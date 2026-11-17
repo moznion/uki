@@ -81,6 +81,7 @@ Runs tasks at the repository root and records the result for `HEAD`.
 - With task names, runs only those tasks ("task runner mode"). Their results are merged into the existing record for the commit, so tasks can be run one at a time.
 - Tasks run sequentially in the listed order. All of them run even if one fails, unless `--fail-fast` is given.
 - Both successes and failures are recorded.
+- Files listed in a task's [`artifacts`](docs/configuration.md#artifacts) are stored with the record; read them back with `uki artifact get`.
 
 The result is **not** recorded (a warning is printed and the tasks still run) when:
 
@@ -107,8 +108,11 @@ commit  1606b4d401f6 (main)
 record  origin/uki/records:records/16/1606b4d401f6c6c84c3247d106d2878ab0baf680.json
   lint  ok                    3ms  2026-11-17 09:47:16  darwin/arm64
   test  ok                  211ms  2026-11-17 09:47:16  darwin/arm64
+        artifact coverage.out (47.1 KiB)
 status  success: Passed: lint, test
 ```
+
+Stored [artifacts](docs/configuration.md#artifacts) are listed under their task.
 
 It warns when the working tree is dirty, and when the local `uki.yaml` differs from the one on the remote default branch (`origin/HEAD`), because GitHub evaluates with the latter.
 
@@ -130,12 +134,29 @@ Sets commit statuses from records. Meant to run inside GitHub Actions (the workf
 | `--sha <sha> --branch <name>` | Judge one commit as if it had been pushed to `<name>`. `--sha` must be a full commit SHA. |
 | `--records-before <sha> --records-after <sha>` | Judge every commit whose record changed between two commits of the records branch. |
 | `--dry-run` | Print verdicts instead of calling the GitHub API. |
+| `--output <format>` | `text` (default) prints one line per judged commit. `json` prints, once at the end, an array of `{"sha", "branch", "state", "description"}`, for a later workflow step (e.g. to fetch artifacts of the commits that passed). |
 
 Pass exactly one of `--github-event`, `--sha`, or `--records-after`.
 
 Environment: `GITHUB_TOKEN` (needs the `statuses: write` permission) and `GITHUB_REPOSITORY`; with `--github-event` also `GITHUB_REF`, `GITHUB_SHA`, `GITHUB_EVENT_NAME` (must be `push`) and `GITHUB_EVENT_PATH`; optionally `GITHUB_API_URL`, `GITHUB_SERVER_URL` and `GITHUB_RUN_ID` (used to link the status to the workflow run). All are provided by GitHub Actions.
 
 A commit that GitHub does not know yet is skipped with a message; the later push of that commit marks it.
+
+### `uki artifact get [flags] <task> <path>`
+
+Prints an [artifact](docs/configuration.md#artifacts) that `<task>` stored with the record of a commit. The content is checked against the SHA-256 and size in the record, and, when `record.allowed_signers` is set, the record's signature is verified the same way `uki mark` does, so the output is exactly what the recorder stored.
+
+```sh
+uki artifact get --rev "$GITHUB_SHA" -o coverage.out test coverage.out
+```
+
+| Flag | Description |
+|---|---|
+| `--rev <commit>` | Commit whose record holds the artifact. Default: `HEAD`. A full SHA does not need to exist locally, so a shallow checkout of the default branch works. |
+| `-o <file>` | Write to this file (creating parent directories) instead of stdout. |
+| `--no-fetch` | Use the local copy of the records branch instead of fetching it. |
+
+Exit code: `0` on success; `1` when there is no record, the task or artifact is not in it, or the content does not match; `2` for usage errors.
 
 ### `uki init`
 
@@ -150,7 +171,7 @@ $ uki config get record.branch
 uki/records
 ```
 
-Keys: `record.branch`, `record.remote`, `record.sign`, `record.allowed_signers`, `status.context`. Unset values print an empty line. Exit code: `0` on success, `1` for an unknown key or an unreadable `uki.yaml`, `2` for usage errors.
+Keys: `record.branch`, `record.remote`, `record.sign`, `record.allowed_signers`, `record.max_artifact_bytes`, `status.context`. Unset values print an empty line. Exit code: `0` on success, `1` for an unknown key or an unreadable `uki.yaml`, `2` for usage errors.
 
 ### `uki version`
 
@@ -203,6 +224,16 @@ Records live on an orphan branch (default `uki/records`) that shares no history 
 ```
 
 `config_sha256` is the SHA-256 of `uki.yaml` at the recorded commit; `log_sha256` is the SHA-256 of the task's combined stdout and stderr. The output itself is not stored.
+
+A task with [artifacts](docs/configuration.md#artifacts) also lists them in its result, keyed by their repository-relative path:
+
+```json
+      "artifacts": {
+        "coverage.out": { "sha256": "9f2c41d0...", "size": 48213 }
+      }
+```
+
+The files themselves are stored uncompressed (git compresses objects anyway) at `artifacts/<first two hex chars>/<sha>/<task>/<path>`, in the same commit as the record, so a record signature also vouches for the digests. `uki mark` does not look at artifacts; `uki artifact get` checks them when reading.
 
 The record commit message summarizes the result with trailers (`Uki-Target`, `Uki-Tree`, `Uki-Task`), so `git log uki/records` doubles as an audit log.
 

@@ -93,3 +93,40 @@ func TestParseEmpty(t *testing.T) {
 		t.Errorf("default branch not applied: %q", c.Record.Branch)
 	}
 }
+
+func TestParseArtifacts(t *testing.T) {
+	c, err := Parse([]byte(`
+tasks:
+  test: { run: "go test", artifacts: [coverage.out, build/report.xml] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(c.Tasks["test"].Artifacts, []string{"coverage.out", "build/report.xml"}) {
+		t.Errorf("artifacts = %v", c.Tasks["test"].Artifacts)
+	}
+	if c.Record.MaxArtifactBytes != DefaultMaxArtifactBytes {
+		t.Errorf("default max_artifact_bytes not applied: %d", c.Record.MaxArtifactBytes)
+	}
+
+	for name, cfg := range map[string]string{
+		"absolute":      `tasks: { t: { run: x, artifacts: [/etc/passwd] } }`,
+		"parent":        `tasks: { t: { run: x, artifacts: [../x] } }`,
+		"unclean":       `tasks: { t: { run: x, artifacts: [a//b] } }`,
+		"dot":           `tasks: { t: { run: x, artifacts: [./a] } }`,
+		"git dir":       `tasks: { t: { run: x, artifacts: [.git/config] } }`,
+		"backslash":     `tasks: { t: { run: x, artifacts: ['a\b'] } }`,
+		"empty":         `tasks: { t: { run: x, artifacts: [""] } }`,
+		"duplicate":     `tasks: { t: { run: x, artifacts: [a, a] } }`,
+		"task name":     `tasks: { a/b: { run: x, artifacts: [a] } }`,
+		"negative size": `record: { max_artifact_bytes: -1 }`,
+	} {
+		if _, err := Parse([]byte(cfg)); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	// A task without artifacts may still use any name.
+	if _, err := Parse([]byte(`tasks: { a/b: { run: x } }`)); err != nil {
+		t.Errorf("task name without artifacts: %v", err)
+	}
+}

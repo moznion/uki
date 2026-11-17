@@ -7,12 +7,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
 // FileName is the config file name, looked up at the repository root.
 const FileName = "uki.yaml"
+
+// DefaultMaxArtifactBytes is the default per-file limit for task artifacts.
+// It stays well below GitHub's 100 MB per-file push limit.
+const DefaultMaxArtifactBytes = 10 << 20
 
 type Config struct {
 	Tasks    map[string]Task `yaml:"tasks"`
@@ -24,6 +30,10 @@ type Config struct {
 type Task struct {
 	Run string            `yaml:"run"`
 	Env map[string]string `yaml:"env"`
+	// Artifacts are repository-relative files the task produces (e.g. a
+	// coverage profile). They are stored on the records branch next to the
+	// record, so they must be ignored by git rather than tracked.
+	Artifacts []string `yaml:"artifacts"`
 }
 
 // BranchRule maps a branch glob to the tasks required on matching branches.
@@ -43,6 +53,9 @@ type RecordConfig struct {
 	// AllowedSigners is a repo-relative path to an SSH allowed_signers file.
 	// When set, `uki mark` rejects records whose commit signature does not verify.
 	AllowedSigners string `yaml:"allowed_signers"`
+	// MaxArtifactBytes caps the size of each artifact file. Larger files are
+	// left out of the record with a warning. 0 means DefaultMaxArtifactBytes.
+	MaxArtifactBytes int64 `yaml:"max_artifact_bytes"`
 }
 
 type StatusConfig struct {
@@ -77,6 +90,9 @@ func Parse(b []byte) (*Config, error) {
 	if c.Status.Context == "" {
 		c.Status.Context = "uki"
 	}
+	if c.Record.MaxArtifactBytes == 0 {
+		c.Record.MaxArtifactBytes = DefaultMaxArtifactBytes
+	}
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -88,6 +104,22 @@ func (c *Config) validate() error {
 		if t.Run == "" {
 			return fmt.Errorf("task %q: run is empty", name)
 		}
+		if len(t.Artifacts) > 0 && !ValidArtifactTaskName(name) {
+			return fmt.Errorf("task %q: a task with artifacts must have a name usable as a directory (no \"/\", not \".\" or \"..\")", name)
+		}
+		seen := map[string]bool{}
+		for _, a := range t.Artifacts {
+			if !ValidArtifactPath(a) {
+				return fmt.Errorf("task %q: artifact %q must be a clean repository-relative path to a file", name, a)
+			}
+			if seen[a] {
+				return fmt.Errorf("task %q: artifact %q is listed twice", name, a)
+			}
+			seen[a] = true
+		}
+	}
+	if c.Record.MaxArtifactBytes < 0 {
+		return errors.New("record.max_artifact_bytes must not be negative")
 	}
 	for i, r := range c.Branches {
 		if r.Match == "" {
@@ -110,4 +142,25 @@ func (c *Config) TasksForBranch(branch string) ([]string, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ValidArtifactPath reports whether p is a clean, slash-separated path that
+// stays inside the repository: not absolute, no "." or ".." elements, no
+// backslashes, and not inside .git.
+func ValidArtifactPath(p string) bool {
+	if p == "" || p != path.Clean(p) || path.IsAbs(p) || strings.Contains(p, "\\") {
+		return false
+	}
+	for _, e := range strings.Split(p, "/") {
+		if e == "." || e == ".." || e == ".git" {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidArtifactTaskName reports whether name can be used as one directory
+// level in artifact paths on the records branch.
+func ValidArtifactTaskName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\")
 }

@@ -45,6 +45,7 @@ A map from task name to task definition. Task names are free-form strings and ar
 |---|---|---|---|
 | `run` | string | yes | Command executed with `sh -c`, from the repository root. |
 | `env` | map of string to string | no | Extra environment variables. They are added on top of the environment `uki` was started with. |
+| `artifacts` | list of strings | no | Files the task produces that are stored with the record (see [Artifacts](#artifacts)). |
 
 A task passes when its command exits with status `0`.
 
@@ -69,6 +70,27 @@ Notes:
 - Tasks must not leave the working tree dirty. If a task generates files, list them in `.gitignore`; otherwise the result is not recorded.
 - Tasks must not create commits or switch branches. If `HEAD` moves during a run, the result is not recorded.
 - The task's output is streamed to the terminal and only its SHA-256 is recorded.
+
+### Artifacts
+
+`artifacts` lists files a task produces, such as a coverage profile or a test report, that should be available after the run, for example to a GitHub Actions job that comments coverage on a pull request. `uki run` stores them on the records branch next to the record, and `uki artifact get` reads them back.
+
+```yaml
+tasks:
+  test:
+    run: go test -coverprofile=coverage.out ./...
+    artifacts: [coverage.out]
+```
+
+- Paths are relative to the repository root, slash-separated and clean (`build/report.xml`, not `./build/report.xml` or `../x`).
+- Artifacts must be ignored by git (`.gitignore`), not tracked: a tracked file is already in the commit. `uki run` refuses to start when an artifact of a task it is about to run is tracked.
+- A task with artifacts needs a name that works as a directory name: no `/` or `\`, and not `.` or `..`.
+- Each file is copied as soon as its task ends, so a later task cannot change what is stored. Artifacts are stored whether the task passed or failed.
+- A file that is missing, is not a regular file (a symlink, a directory), resolves outside the repository, or is larger than [`record.max_artifact_bytes`](#record) is left out with a warning. The task result is not affected.
+- Running a task again for the same commit replaces all of its artifacts, including dropping files the new run did not produce.
+- Nothing is stored with `--no-record`, or when the run is not recorded for any other reason.
+
+Artifacts are published to everyone who can read the repository, and they stay in the history of the records branch. Do not list files that may contain secrets.
 
 ## `branches`
 
@@ -125,6 +147,7 @@ Quote patterns that start with `*` (`"**"`, `"*-wip"`): an unquoted leading `*` 
 | `remote` | string | `origin` | Git remote the records branch is fetched from and pushed to. |
 | `sign` | bool | `false` | Create record commits with `git commit -S`, using your git signing configuration. |
 | `allowed_signers` | string | *(unset)* | Repository-relative path to an SSH allowed signers file. When set, `uki mark` and `uki status` require a valid SSH signature from a listed key. |
+| `max_artifact_bytes` | integer | `10485760` (10 MiB) | Largest size of one [artifact](#artifacts) file. Larger files are left out of the record with a warning. GitHub rejects pushes containing files over 100 MB. |
 
 ### Changing `record.branch`
 
@@ -161,7 +184,8 @@ tasks:
   lint:
     run: golangci-lint run ./...
   test:
-    run: go test -race ./...
+    run: go test -race -coverprofile=coverage.out ./...
+    artifacts: [coverage.out]
   e2e:
     run: go test -tags=e2e ./e2e/...
     env:
@@ -182,6 +206,7 @@ record:
   remote: origin
   sign: true
   allowed_signers: .uki/allowed_signers
+  max_artifact_bytes: 10485760
 
 status:
   context: uki
